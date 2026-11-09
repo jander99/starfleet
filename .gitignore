@@ -1,9 +1,41 @@
+# Rust
 target/
+*.rs.bk
+
+# Node and front-end build output
 node_modules/
 dist/
+dist-ssr/
+.vite/
+*.tsbuildinfo
+coverage/
+*.local
+
+# Tauri
 src-tauri/gen/
+
+# Logs
 *.log
+
+# Editors
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+*.swo
+*~
+
+# Operating systems
 .DS_Store
+Thumbs.db
+desktop.ini
+
+# Agent and code-index tooling
+.codegraph/
+.serena/
+.worktrees/
+.claude/settings.local.json
+
 # Local machine state never belongs in this public repo
 settings.json
 board.json
