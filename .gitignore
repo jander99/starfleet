@@ -1,0 +1,10 @@
+target/
+node_modules/
+dist/
+src-tauri/gen/
+*.log
+.DS_Store
+# Local machine state never belongs in this public repo
+settings.json
+board.json
+.env*
