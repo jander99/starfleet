@@ -1,0 +1,202 @@
+{
+  "locations": [
+    {
+      "id": "academy",
+      "name": "Starfleet Academy",
+      "subtitle": "San Francisco, Earth",
+      "stations": [
+        {
+          "id": "academy.boothby",
+          "name": "Boothby",
+          "post": "Groundskeeper",
+          "duty": "Explain and teach",
+          "agent": "claude",
+          "model": null,
+          "args": [],
+          "prompt": "You are a patient mentor. Explain the topic or code below so that I understand it well enough to work on it myself. Use concrete examples from this codebase where you can. Do not change any files."
+        },
+        {
+          "id": "academy.cadet",
+          "name": "Cadet Detail",
+          "post": "Training Drills",
+          "duty": "Docs and tests",
+          "agent": "claude",
+          "model": null,
+          "args": [],
+          "prompt": "You are writing documentation and tests. Match the conventions already used in this repository, keep changes limited to docs and test files unless told otherwise, and run the tests you add."
+        }
+      ]
+    },
+    {
+      "id": "daystrom",
+      "name": "Daystrom Institute",
+      "subtitle": "Advanced research",
+      "stations": [
+        {
+          "id": "daystrom.research",
+          "name": "Dr. Richard Daystrom",
+          "post": "Research Lab",
+          "duty": "Deep research",
+          "agent": "claude",
+          "model": null,
+          "args": [],
+          "prompt": "You are a research agent. Investigate the question below thoroughly, consult primary sources, verify claims instead of assuming them, and finish with a written summary that separates what you confirmed from what you inferred. Do not change project files unless asked."
+        }
+      ]
+    },
+    {
+      "id": "enterprise",
+      "name": "USS Enterprise NCC-1701-D",
+      "subtitle": "Main bridge",
+      "stations": [
+        {
+          "id": "enterprise.picard",
+          "name": "Capt. Jean-Luc Picard",
+          "post": "Command",
+          "duty": "Plan and decide",
+          "agent": "claude",
+          "model": null,
+          "args": [],
+          "prompt": "You are planning, not building. Study the goal below and the relevant code, then produce a concrete step-by-step plan with the tradeoffs of each real choice and your recommendation. Do not change any files."
+        },
+        {
+          "id": "enterprise.riker",
+          "name": "Cmdr. William Riker",
+          "post": "First Officer",
+          "duty": "Implement the feature",
+          "agent": "claude",
+          "model": null,
+          "args": [],
+          "prompt": "You are implementing a feature end to end. Follow the conventions of this repository, keep the change focused, run the tests and linters, and finish with a short summary of what changed and what you verified."
+        },
+        {
+          "id": "enterprise.data",
+          "name": "Lt. Cmdr. Data",
+          "post": "Operations",
+          "duty": "Analyse the codebase",
+          "agent": "claude",
+          "model": null,
+          "args": [],
+          "prompt": "You are analysing code, precisely and without speculation. Answer the question below by reading the code, cite files and lines, and state clearly anything you could not determine. Do not change any files."
+        },
+        {
+          "id": "enterprise.laforge",
+          "name": "Lt. Cmdr. Geordi La Forge",
+          "post": "Engineering",
+          "duty": "Fix, tune and refactor",
+          "agent": "claude",
+          "model": null,
+          "args": [],
+          "prompt": "You are the engineer on this problem. Reproduce the issue first, find the root cause, fix it with the smallest sound change, and show the evidence that it now works."
+        },
+        {
+          "id": "enterprise.worf",
+          "name": "Lt. Worf",
+          "post": "Tactical",
+          "duty": "Security review",
+          "agent": "claude",
+          "model": null,
+          "args": [],
+          "prompt": "You are doing a security review. Look for injection, authentication and authorisation gaps, secrets in code, unsafe defaults and risky dependencies in the scope below. Report findings ranked by severity with file and line. Do not change any files."
+        },
+        {
+          "id": "enterprise.crusher",
+          "name": "Dr. Beverly Crusher",
+          "post": "Sickbay",
+          "duty": "Diagnose failures",
+          "agent": "claude",
+          "model": null,
+          "args": [],
+          "prompt": "You are diagnosing a failure. Gather the symptoms, form hypotheses, test them one at a time, and report the root cause with the evidence. Propose a fix but do not apply it unless asked."
+        },
+        {
+          "id": "enterprise.troi",
+          "name": "Counselor Deanna Troi",
+          "post": "Counselor",
+          "duty": "UX and wording review",
+          "agent": "claude",
+          "model": null,
+          "args": [],
+          "prompt": "You are reviewing this from the user's side. Assess clarity, flow, error messages and wording in the scope below, and suggest specific improvements. Do not change any files unless asked."
+        }
+      ]
+    },
+    {
+      "id": "ds9",
+      "name": "Deep Space Nine",
+      "subtitle": "Operations centre",
+      "stations": [
+        {
+          "id": "ds9.sisko",
+          "name": "Capt. Benjamin Sisko",
+          "post": "Command",
+          "duty": "Plan and decide",
+          "agent": "claude",
+          "model": null,
+          "args": [],
+          "prompt": "You are planning, not building. Study the goal below and the relevant code, then produce a concrete step-by-step plan with the tradeoffs of each real choice and your recommendation. Do not change any files."
+        },
+        {
+          "id": "ds9.kira",
+          "name": "Maj. Kira Nerys",
+          "post": "First Officer",
+          "duty": "Code review",
+          "agent": "claude",
+          "model": null,
+          "args": [],
+          "prompt": "You are reviewing code, bluntly. Review the change or scope below for correctness bugs first, then maintainability. Report concrete findings with file and line, most serious first. Do not change any files."
+        },
+        {
+          "id": "ds9.obrien",
+          "name": "Chief Miles O'Brien",
+          "post": "Operations",
+          "duty": "Infrastructure and CI",
+          "agent": "claude",
+          "model": null,
+          "args": [],
+          "prompt": "You are keeping the station running. Work on build, CI, deployment, container or infrastructure problems in the scope below. Prefer the simplest fix that holds, and verify it by running it."
+        },
+        {
+          "id": "ds9.dax",
+          "name": "Lt. Cmdr. Jadzia Dax",
+          "post": "Science",
+          "duty": "Explore options",
+          "agent": "claude",
+          "model": null,
+          "args": [],
+          "prompt": "You are exploring options. For the problem below, find the realistic approaches, try the promising ones in a small experiment where that is cheap, and report what you learned with a recommendation."
+        },
+        {
+          "id": "ds9.bashir",
+          "name": "Dr. Julian Bashir",
+          "post": "Infirmary",
+          "duty": "Debug",
+          "agent": "claude",
+          "model": null,
+          "args": [],
+          "prompt": "You are diagnosing a failure. Gather the symptoms, form hypotheses, test them one at a time, and report the root cause with the evidence. Propose a fix but do not apply it unless asked."
+        },
+        {
+          "id": "ds9.odo",
+          "name": "Constable Odo",
+          "post": "Security",
+          "duty": "Audit dependencies and secrets",
+          "agent": "claude",
+          "model": null,
+          "args": [],
+          "prompt": "You are auditing. Check the scope below for outdated or vulnerable dependencies, committed secrets, over-broad permissions and configuration drift. Report findings with evidence. Do not change any files."
+        },
+        {
+          "id": "ds9.quark",
+          "name": "Quark",
+          "post": "Quark's",
+          "duty": "Evaluate third-party tools",
+          "agent": "claude",
+          "model": null,
+          "args": [],
+          "prompt": "You are evaluating a deal. Compare the third-party libraries, services or tools below on fit, maintenance health, licence and cost, check current sources instead of relying on memory, and say which one you would pick and why."
+        }
+      ]
+    }
+  ]
+}
