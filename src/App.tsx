@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { backend, errorText, isDemo, type BoardView, type Card, type Check, type Roster, type Status } from "./api";
 import { Board } from "./components/Board";
 import { CardDialog, DispatchDialog } from "./components/Dialogs";
+import { Backdrop } from "./components/Backdrop";
 import { LocationView, SectorMap } from "./components/MapView";
 import { SessionDrawer, type DrawerTarget } from "./components/SessionDrawer";
 import { STATUS_LABEL } from "./ui";
@@ -135,104 +136,107 @@ export default function App() {
   const checkFails = checks?.filter((c) => c.status === "fail").length ?? 0;
 
   return (
-    <div className="app">
-      <header className="topbar">
-        <div className="brand">
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M12 2 L20 21 L12 16 L4 21 Z" />
-          </svg>
-          STARFLEET
-        </div>
-        <nav>
-          {(
-            [
-              ["map", "Sector map"],
-              ["board", "Mission board"],
-              ["check", "System check"],
-            ] as [Tab, string][]
-          ).map(([id, label]) => (
-            <button key={id} className={tab === id ? "tab active" : "tab"} onClick={() => (setTab(id), id === "map" && setLocationId(null))}>
-              {label}
-              {id === "check" && checkFails > 0 && <span className="tab-flag">{checkFails}</span>}
-            </button>
-          ))}
-        </nav>
-        <div className="counters">
-          {counters.map(([status, n]) => (
-            <button key={status} className={`counter status-${status}${n ? "" : " zero"}`} onClick={() => setTab("board")}>
-              <span className="dot" />
-              {STATUS_LABEL[status]} <b>{n}</b>
-            </button>
-          ))}
-          <span className={view.connected ? "conn ok" : "conn bad"} title={view.error ?? view.endpoint}>
-            {view.connected ? `Herdr ${view.herdr_version ?? ""}` : "Herdr offline"}
-          </span>
-        </div>
-      </header>
-
-      {isDemo && <div className="strip">Demo data. This is the UI running in a browser without the app shell or Herdr.</div>}
-      {!view.connected && view.error && (
-        <div className="strip bad">
-          Not connected to Herdr: {view.error}. Retrying.{" "}
-          <button className="ghost" onClick={() => setTab("check")}>
-            Open system check
-          </button>
-        </div>
-      )}
-      {notice && (
-        <div className="strip warn">
-          {notice}{" "}
-          <button className="ghost" onClick={() => setNotice(null)}>
-            Dismiss
-          </button>
-        </div>
-      )}
-
-      <main className={target ? "with-drawer" : ""}>
-        <div className="content">
-          {tab === "map" &&
-            (location ? (
-              <LocationView
-                location={location}
-                view={view}
-                onBack={() => setLocationId(null)}
-                onStation={(st) => setDispatch({ stationId: st.id, cardId: null })}
-                onSession={(linkId) => setDrawer({ linkId })}
-              />
-            ) : (
-              <SectorMap roster={roster} view={view} onOpen={setLocationId} />
+    <>
+      <Backdrop />
+      <div className="app">
+        <header className="topbar">
+          <div className="brand">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 2 L20 21 L12 16 L4 21 Z" />
+            </svg>
+            STARFLEET
+          </div>
+          <nav>
+            {(
+              [
+                ["map", "Sector map"],
+                ["board", "Mission board"],
+                ["check", "System check"],
+              ] as [Tab, string][]
+            ).map(([id, label]) => (
+              <button key={id} className={tab === id ? "tab active" : "tab"} onClick={() => (setTab(id), id === "map" && setLocationId(null))}>
+                {label}
+                {id === "check" && checkFails > 0 && <span className="tab-flag">{checkFails}</span>}
+              </button>
             ))}
-          {tab === "board" && (
-            <Board
-              view={view}
-              onSession={(linkId) => setDrawer({ linkId })}
-              onContact={(paneId) => setDrawer({ paneId })}
-              onDispatch={(cardId) => setDispatch({ stationId: null, cardId })}
-              onNewCard={() => setCardDialog({ card: null })}
-              onEdit={(card) => setCardDialog({ card })}
-            />
-          )}
-          {tab === "check" && <Preflight checks={checks} running={checking} onRun={runChecks} />}
-        </div>
-        {target && <SessionDrawer key={target.linkId ?? target.paneId} target={target} onClose={() => setDrawer(null)} />}
-      </main>
+          </nav>
+          <div className="counters">
+            {counters.map(([status, n]) => (
+              <button key={status} className={`counter status-${status}${n ? "" : " zero"}`} onClick={() => setTab("board")}>
+                <span className="dot" />
+                {STATUS_LABEL[status]} <b>{n}</b>
+              </button>
+            ))}
+            <span className={view.connected ? "conn ok" : "conn bad"} title={view.error ?? view.endpoint}>
+              {view.connected ? `Herdr ${view.herdr_version ?? ""}` : "Herdr offline"}
+            </span>
+          </div>
+        </header>
 
-      {dispatch && (
-        <DispatchDialog
-          roster={roster}
-          cards={view.cards}
-          stationId={dispatch.stationId}
-          cardId={dispatch.cardId}
-          onClose={() => setDispatch(null)}
-          onDispatched={(result) => {
-            setDispatch(null);
-            setNotice(result.warning);
-            setTab("board");
-            setDrawer({ linkId: result.link_id });
-          }}
-        />
-      )}
-      {cardDialog && <CardDialog card={cardDialog.card} onClose={() => setCardDialog(null)} />}
-    </div>
+        {isDemo && <div className="strip">Demo data. This is the UI running in a browser without the app shell or Herdr.</div>}
+        {!view.connected && view.error && (
+          <div className="strip bad">
+            Not connected to Herdr: {view.error}. Retrying.{" "}
+            <button className="ghost" onClick={() => setTab("check")}>
+              Open system check
+            </button>
+          </div>
+        )}
+        {notice && (
+          <div className="strip warn">
+            {notice}{" "}
+            <button className="ghost" onClick={() => setNotice(null)}>
+              Dismiss
+            </button>
+          </div>
+        )}
+
+        <main className={target ? "with-drawer" : ""}>
+          <div className="content">
+            {tab === "map" &&
+              (location ? (
+                <LocationView
+                  location={location}
+                  view={view}
+                  onBack={() => setLocationId(null)}
+                  onStation={(st) => setDispatch({ stationId: st.id, cardId: null })}
+                  onSession={(linkId) => setDrawer({ linkId })}
+                />
+              ) : (
+                <SectorMap roster={roster} view={view} onOpen={setLocationId} />
+              ))}
+            {tab === "board" && (
+              <Board
+                view={view}
+                onSession={(linkId) => setDrawer({ linkId })}
+                onContact={(paneId) => setDrawer({ paneId })}
+                onDispatch={(cardId) => setDispatch({ stationId: null, cardId })}
+                onNewCard={() => setCardDialog({ card: null })}
+                onEdit={(card) => setCardDialog({ card })}
+              />
+            )}
+            {tab === "check" && <Preflight checks={checks} running={checking} onRun={runChecks} />}
+          </div>
+          {target && <SessionDrawer key={target.linkId ?? target.paneId} target={target} onClose={() => setDrawer(null)} />}
+        </main>
+
+        {dispatch && (
+          <DispatchDialog
+            roster={roster}
+            cards={view.cards}
+            stationId={dispatch.stationId}
+            cardId={dispatch.cardId}
+            onClose={() => setDispatch(null)}
+            onDispatched={(result) => {
+              setDispatch(null);
+              setNotice(result.warning);
+              setTab("board");
+              setDrawer({ linkId: result.link_id });
+            }}
+          />
+        )}
+        {cardDialog && <CardDialog card={cardDialog.card} onClose={() => setCardDialog(null)} />}
+      </div>
+    </>
   );
 }

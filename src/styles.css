@@ -296,30 +296,40 @@ main {
 .map * {
   vector-effect: non-scaling-stroke;
 }
-.star {
-  fill: #c9d6f2;
-  opacity: 0.8;
+/* Pixel star field behind everything */
+.backdrop {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+  image-rendering: pixelated;
+  background: #05070d;
 }
-.star.far {
-  opacity: 0.3;
+.app {
+  position: relative;
+  z-index: 1;
 }
-.earth {
-  fill: none;
-  stroke: #2f4470;
-  stroke-width: 1;
+/* Whole multiples of the 320x180 art keep its pixels square */
+.earth-limb {
+  position: fixed;
+  left: 0;
+  bottom: 0;
+  width: 640px;
+  aspect-ratio: 16 / 9;
+  pointer-events: none;
 }
-.earth circle {
-  fill: #0d1424;
+.earth-limb img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  image-rendering: pixelated;
 }
-.earth .tether {
-  stroke-dasharray: 3 5;
-  stroke: #46608f;
-}
-.earth text {
-  fill: #46608f;
-  stroke: none;
-  font-size: 12px;
-  letter-spacing: 0.3em;
+@media (min-width: 1500px) {
+  .earth-limb {
+    width: 960px;
+  }
 }
 .site {
   cursor: pointer;
