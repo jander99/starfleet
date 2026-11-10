@@ -1,5 +1,12 @@
 import type { BoardView, Location, Roster, Session, Station, Status } from "../api";
 import { StatusPill } from "../ui";
+import { useSky, type Frame } from "../sky";
+import dawn from "../assets/earth/earth-dawn.png";
+import day from "../assets/earth/earth-day.png";
+import dusk from "../assets/earth/earth-dusk.png";
+import night from "../assets/earth/earth-night.png";
+
+const EARTH: Record<Frame, string> = { dawn, day, dusk, night };
 
 /** Live sessions that were dispatched from a station at this location. */
 function sessionsAt(view: BoardView | null, prefix: string): Session[] {
@@ -11,14 +18,6 @@ function tally(sessions: Session[]): [Status, number][] {
   const order: Status[] = ["blocked", "done", "working"];
   return order.map((s) => [s, sessions.filter((x) => x.status === s).length] as [Status, number]).filter(([, n]) => n > 0);
 }
-
-// Deterministic star field, two depths.
-const STARS = Array.from({ length: 90 }, (_, i) => ({
-  x: (i * 137.5) % 1000,
-  y: (i * 89.3 + (i % 7) * 31) % 600,
-  r: i % 9 === 0 ? 1.4 : 0.7,
-  far: i % 3 !== 0,
-}));
 
 const SITES: Record<string, { x: number; y: number; labelY: number }> = {
   academy: { x: 150, y: 190, labelY: 62 },
@@ -68,22 +67,17 @@ function Shapes() {
 }
 
 export function SectorMap(props: { roster: Roster; view: BoardView | null; onOpen: (locationId: string) => void }) {
+  const sky = useSky();
   return (
     <div className="map-wrap">
       <svg className="map" viewBox="0 0 1000 600" role="group" aria-label="Sector map">
         <Shapes />
-        {STARS.map((s, i) => (
-          <circle key={i} className={s.far ? "star far" : "star"} cx={s.x} cy={s.y} r={s.r} />
-        ))}
-
-        {/* Earth, with the two ground sites tethered to it */}
+        {/* Earth in pixel art, lit for the local time, with the two ground sites tethered to it */}
         <g className="earth">
-          <circle cx="210" cy="520" r="230" />
-          <ellipse cx="210" cy="520" rx="230" ry="70" />
-          <ellipse cx="210" cy="520" rx="110" ry="230" />
-          <ellipse cx="210" cy="520" rx="230" ry="150" />
-          <path className="tether" d="M150 232 V300 M360 346 L330 372" />
-          <text x="60" y="545">EARTH</text>
+          <image className="earth-img" href={EARTH[sky.from]} x="0" y="285" width="560" height="315" />
+          {sky.mix > 0 && <image className="earth-img" href={EARTH[sky.to]} x="0" y="285" width="560" height="315" opacity={sky.mix} />}
+          <path className="tether" d="M150 232 V372 M360 346 V458" />
+          <text x="40" y="578">EARTH</text>
         </g>
 
         {props.roster.locations.map((loc) => {
