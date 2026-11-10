@@ -66,19 +66,23 @@ function Shapes() {
   );
 }
 
-export function SectorMap(props: { roster: Roster; view: BoardView | null; onOpen: (locationId: string) => void }) {
+/** Earth in pixel art, lit for the local time, bleeding off the bottom-left corner of the window. */
+function EarthLimb() {
   const sky = useSky();
   return (
+    <div className="earth-limb" aria-hidden="true">
+      <img src={EARTH[sky.from]} alt="" />
+      {sky.mix > 0 && <img src={EARTH[sky.to]} alt="" style={{ opacity: sky.mix }} />}
+    </div>
+  );
+}
+
+export function SectorMap(props: { roster: Roster; view: BoardView | null; onOpen: (locationId: string) => void }) {
+  return (
     <div className="map-wrap">
+      <EarthLimb />
       <svg className="map" viewBox="0 0 1000 600" role="group" aria-label="Sector map">
         <Shapes />
-        {/* Earth in pixel art, lit for the local time, with the two ground sites tethered to it */}
-        <g className="earth">
-          <image className="earth-img" href={EARTH[sky.from]} x="0" y="285" width="560" height="315" />
-          {sky.mix > 0 && <image className="earth-img" href={EARTH[sky.to]} x="0" y="285" width="560" height="315" opacity={sky.mix} />}
-          <path className="tether" d="M150 232 V372 M360 346 V458" />
-          <text x="40" y="578">EARTH</text>
-        </g>
 
         {props.roster.locations.map((loc) => {
           const site = SITES[loc.id];
