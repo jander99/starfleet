@@ -33,7 +33,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt, clippy
+          components: rustfmt, clippy, llvm-tools-preview
 
       - name: Install Tauri system dependencies
         if: runner.os == 'Linux'
@@ -56,9 +56,43 @@ jobs:
         if: runner.os == 'Linux'
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
-      - name: Test
+      - name: Test (TypeScript) with coverage
         if: runner.os == 'Linux'
-        run: cargo test --workspace --locked
+        run: npm run coverage
+
+      - uses: taiki-e/install-action@v2
+        if: runner.os == 'Linux'
+        with:
+          tool: cargo-llvm-cov
+
+      # Runs the whole workspace test suite; mock-herdr is test scaffolding.
+      - name: Test (Rust) with coverage
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p coverage
+          cargo llvm-cov --workspace --locked --ignore-filename-regex 'mock-herdr' --lcov --output-path coverage/rust.lcov
+          cargo llvm-cov report --ignore-filename-regex 'mock-herdr' --summary-only | tee coverage/rust-summary.txt
+
+      - name: Coverage summary
+        if: runner.os == 'Linux' && !cancelled()
+        run: |
+          {
+            echo "## Coverage"
+            echo "### TypeScript"
+            node -e "const t=require('./coverage/ts/coverage-summary.json').total;console.log('| Metric | Covered | Total | % |\n|---|---|---|---|');for(const k of ['lines','statements','functions','branches'])console.log('| '+k+' | '+t[k].covered+' | '+t[k].total+' | '+t[k].pct+'% |')"
+            echo "### Rust"
+            echo '```'
+            cat coverage/rust-summary.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload coverage
+        if: runner.os == 'Linux' && !cancelled()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage/
+          if-no-files-found: warn
 
       # mock-herdr is Unix-only, so Windows compiles just the app.
       - name: Compile app
