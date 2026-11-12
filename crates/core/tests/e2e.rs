@@ -277,6 +277,38 @@ async fn closed_sessions_go_offline_and_the_board_survives_a_restart() {
 }
 
 #[tokio::test]
+async fn a_finished_session_keeps_its_output_after_the_pane_closes() {
+    let rig = rig().await;
+    let app = rig.app();
+    let card = app
+        .create_card("Record", &rig.workdir("repo"), "")
+        .await
+        .unwrap();
+    let result = app
+        .dispatch(request(&card, "daystrom.research", "find out"))
+        .await
+        .unwrap();
+
+    // The output is saved when the agent finishes, without opening the drawer.
+    until(&app, "done", |v| v.counts.done == 1).await;
+    let saved = |app: &Starfleet| app.saved_output(&result.link_id).unwrap();
+    until(&app, "output saved", |_| {
+        saved(&app).is_some_and(|t| t.contains("simulated work complete"))
+    })
+    .await;
+
+    rig.mock.close_pane(&result.pane_id);
+    let view = until(&app, "offline", |v| v.counts.offline == 1).await;
+    assert!(view.cards[0].sessions[0].output_at.is_some());
+    assert!(saved(&app).unwrap().contains("simulated work complete"));
+
+    // It is part of the board file, so a restart keeps it.
+    let again = rig.app();
+    until(&again, "reloaded", |v| v.connected).await;
+    assert!(saved(&again).unwrap().contains("find out"));
+}
+
+#[tokio::test]
 async fn failures_are_reported_without_leaving_debris() {
     let rig = rig().await;
     let app = rig.app();

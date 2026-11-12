@@ -18,6 +18,10 @@ use tokio::sync::watch;
 /// Workspace token that marks a Herdr workspace as belonging to a card.
 const CARD_TOKEN: &str = "starfleet_card";
 
+/// How many lines of output are saved when an agent stops working. Matches
+/// what the session drawer shows for a live session.
+const OUTPUT_LINES: u32 = 200;
+
 pub struct Options {
     pub paths: Paths,
     /// Override where Herdr is reached; resolved from settings when `None`.
@@ -147,12 +151,14 @@ impl Starfleet {
             });
         match result {
             Ok(snapshot) => {
-                self.store.lock().unwrap().reconcile(&snapshot);
-                let mut live = self.live.write().unwrap();
-                live.snapshot = Some(snapshot.clone());
-                live.error = None;
-                drop(live);
+                let (_, capture) = self.store.lock().unwrap().reconcile(&snapshot);
+                {
+                    let mut live = self.live.write().unwrap();
+                    live.snapshot = Some(snapshot.clone());
+                    live.error = None;
+                }
                 self.notify();
+                self.save_output(capture).await;
                 Ok(snapshot)
             }
             Err(e) => {
@@ -164,6 +170,34 @@ impl Starfleet {
                 Err(e)
             }
         }
+    }
+
+    /// Read the end of each session's output and keep it on its link, so the
+    /// card still shows what the agent said after the pane is closed. A failed
+    /// read is retried on a later refresh.
+    async fn save_output(&self, capture: Vec<(String, String)>) {
+        if capture.is_empty() {
+            return;
+        }
+        for (link_id, pane_id) in capture {
+            let Ok(text) = self.tail(&pane_id, OUTPUT_LINES).await else {
+                continue;
+            };
+            let _ = self.store.lock().unwrap().record_output(&link_id, &text);
+        }
+        self.notify();
+    }
+
+    /// The output saved for a session when its agent last stopped working.
+    pub fn saved_output(&self, link_id: &str) -> Result<Option<String>> {
+        let store = self.store.lock().unwrap();
+        let link = store
+            .board
+            .links
+            .iter()
+            .find(|l| l.id == link_id)
+            .ok_or_else(|| anyhow!("that session is no longer on the board"))?;
+        Ok(link.output.clone())
     }
 
     /// Keep the snapshot current for as long as the app runs.
@@ -443,6 +477,8 @@ impl Starfleet {
             title: Some(station.name.clone()),
             last_status: agent.agent_status,
             last_seen: Some(now_ms()),
+            output: None,
+            output_at: None,
         };
         let result = DispatchResult {
             link_id: link.id.clone(),

@@ -626,6 +626,9 @@ main {
   word-break: break-word;
   line-height: 1.5;
 }
+.saved-note {
+  font-size: 12px;
+}
 .banner {
   border: 1px solid var(--amber);
   border-radius: 8px;

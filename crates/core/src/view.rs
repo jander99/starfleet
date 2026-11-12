@@ -50,6 +50,9 @@ pub struct SessionView {
     pub cwd: Option<String>,
     pub created_at: u64,
     pub last_seen: Option<u64>,
+    /// When output was last saved for this session; `None` if there is none.
+    /// The text itself is fetched separately, to keep the view small.
+    pub output_at: Option<u64>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -102,6 +105,7 @@ fn session_view(link: &SessionLink, snapshot: Option<&Snapshot>, roster: &Roster
         .as_deref()
         .and_then(|id| roster.station(id))
         .map(|s| s.name.clone());
+    let output_at = link.output.as_ref().and(link.output_at);
     match live {
         Some((snap, pane)) => SessionView {
             link_id: link.id.clone(),
@@ -119,6 +123,7 @@ fn session_view(link: &SessionLink, snapshot: Option<&Snapshot>, roster: &Roster
             cwd: pane.foreground_cwd.clone().or_else(|| pane.cwd.clone()),
             created_at: link.created_at,
             last_seen: link.last_seen,
+            output_at,
         },
         None => SessionView {
             link_id: link.id.clone(),
@@ -136,6 +141,7 @@ fn session_view(link: &SessionLink, snapshot: Option<&Snapshot>, roster: &Roster
             cwd: None,
             created_at: link.created_at,
             last_seen: link.last_seen,
+            output_at,
         },
     }
 }

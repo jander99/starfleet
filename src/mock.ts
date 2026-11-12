@@ -69,6 +69,8 @@ export function createMockBackend(): Backend {
   const listeners = new Set<() => void>();
   const notify = () => listeners.forEach((cb) => cb());
   const transcripts = new Map<string, string[]>();
+  // Output saved per session when its agent stops working, as the core does.
+  const saved = new Map<string, string>();
 
   const stationName = (id: string | null) =>
     ROSTER.locations.flatMap((l) => l.stations).find((s) => s.id === id)?.name ?? null;
@@ -96,6 +98,7 @@ export function createMockBackend(): Backend {
     cwd: null,
     created_at: now - ageMin * 60_000,
     last_seen: now - 5_000,
+    output_at: null,
     ...extra,
   });
 
@@ -123,7 +126,10 @@ export function createMockBackend(): Backend {
       updated_at: now - 20 * 60_000,
       sessions: [
         session("w2:p1", "ds9.obrien", "working", "Fix the Loki retention config and verify in Grafana.", 6),
-        session("w2:p0", "ds9.kira", "offline", "Review the Grafana provisioning PR.", 600),
+        session("w2:p0", "ds9.kira", "offline", "Review the Grafana provisioning PR.", 600, {
+          link_id: "l-kira",
+          output_at: now - 590 * 60_000,
+        }),
       ],
     },
     {
@@ -151,15 +157,23 @@ export function createMockBackend(): Backend {
   transcripts.set("w1:p1", ["> Can the library delete cache keys by pattern?", "Finished. Yes: single keys and whole caches; pattern delete needs SCAN."]);
   transcripts.set("w2:p1", ["> Fix the Loki retention config and verify in Grafana.", "Reading loki/config.yaml ..."]);
   transcripts.set("w7:p1", ["opencode session started by hand"]);
+  saved.set(
+    "l-kira",
+    ["> Review the Grafana provisioning PR.", "Reviewed 6 files.", "Finished. Two dashboards hardcode a datasource UID; the rest looks good."].join("\n"),
+  );
 
   const allSessions = () => cards.flatMap((c) => c.sessions);
   const findSession = (paneId: string) => allSessions().find((s) => s.pane_id === paneId);
   const setStatus = (paneId: string, status: Status, line?: string) => {
     const s = findSession(paneId);
     if (s) s.status = s.last_status = status;
+    if (line) transcripts.set(paneId, [...(transcripts.get(paneId) ?? []), line]);
+    if (s && status !== "working") {
+      saved.set(s.link_id, (transcripts.get(paneId) ?? []).join("\n"));
+      s.output_at = Date.now();
+    }
     const c = unassigned.find((u) => u.pane_id === paneId);
     if (c) c.status = status;
-    if (line) transcripts.set(paneId, [...(transcripts.get(paneId) ?? []), line]);
     notify();
   };
   const run = (paneId: string, text: string) => {
@@ -263,6 +277,10 @@ export function createMockBackend(): Backend {
       setTimeout(() => setStatus(paneId, "done", "Finished. Summary: simulated work complete."), 4000);
     },
     tail: async (paneId) => (transcripts.get(paneId) ?? []).join("\n"),
+    savedOutput: async (linkId) => {
+      if (!allSessions().some((s) => s.link_id === linkId)) throw "that session is no longer on the board";
+      return saved.get(linkId) ?? null;
+    },
     focus: async () => {},
     onChange: (cb) => {
       listeners.add(cb);

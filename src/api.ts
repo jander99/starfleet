@@ -23,6 +23,8 @@ export interface Session {
   cwd: string | null;
   created_at: number;
   last_seen: number | null;
+  /** When the end of the output was last saved; null if nothing is saved. */
+  output_at: number | null;
 }
 
 export interface Card {
@@ -128,6 +130,8 @@ export interface Backend {
   followUp(paneId: string, text: string): Promise<void>;
   replyKeys(paneId: string, text: string | null, keys: string[]): Promise<void>;
   tail(paneId: string, lines: number): Promise<string>;
+  /** Output saved when the session's agent last stopped working. */
+  savedOutput(linkId: string): Promise<string | null>;
   focus(paneId: string): Promise<void>;
   /** Calls `cb` whenever the board view may have changed. Returns an unsubscribe. */
   onChange(cb: () => void): () => void;
@@ -147,6 +151,7 @@ const tauriBackend: Backend = {
   followUp: (paneId, text) => invoke("follow_up", { paneId, text }),
   replyKeys: (paneId, text, keys) => invoke("reply_keys", { paneId, text, keys }),
   tail: (paneId, lines) => invoke("tail", { paneId, lines }),
+  savedOutput: (linkId) => invoke("saved_output", { linkId }),
   focus: (paneId) => invoke("focus", { paneId }),
   onChange: (cb) => {
     const pending = listen("board-changed", cb);
