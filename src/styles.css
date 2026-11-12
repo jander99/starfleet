@@ -343,18 +343,9 @@ main {
 .site .hit {
   fill: transparent;
 }
-.site .hull {
-  fill: #0f1728;
-  stroke: var(--teal);
-  stroke-width: 1.4;
-  transition: stroke 0.18s, filter 0.18s;
-}
-/* A darker copy, offset down and right, gives the wireframe some depth. */
-.site .depth {
-  fill: none;
-  stroke: #23426b;
-  stroke-width: 1.4;
-  transition: transform 0.18s ease-out;
+.site .sprite {
+  image-rendering: pixelated;
+  transition: filter 0.18s;
 }
 .site-name {
   fill: var(--text);
@@ -371,9 +362,8 @@ main {
 .site:focus-visible .site-body {
   transform: scale(1.05);
 }
-.site:hover .hull,
-.site:focus-visible .hull {
-  stroke: var(--amber);
+.site:hover .sprite,
+.site:focus-visible .sprite {
   filter: drop-shadow(0 0 6px rgba(242, 166, 90, 0.55));
 }
 .site:hover .site-name,

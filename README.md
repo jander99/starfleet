@@ -10,7 +10,7 @@ This is a personal tool and an early first version.
 ## What it does
 
 - **Sector map**: Starfleet Academy, the Daystrom Institute, the
-  Enterprise-D and Deep Space Nine, as wireframes. Each holds stations.
+  Enterprise-D and Deep Space Nine, drawn in pixel art. Each holds stations.
 - **Stations**: presets for an agent (CLI, model, standing brief). Clicking
   one dispatches an agent for a card.
 - **Mission board**: cards, each tied to a working folder, each with any
