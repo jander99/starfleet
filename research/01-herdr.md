@@ -127,6 +127,15 @@ Found by running it:
 - That trust prompt has no numbered options (`No, exit` is first and is the
   default). Typing `1` does nothing; `down` then `enter` answers it. Enter
   alone chooses `No, exit` and closes the agent.
+- `pane.read` is not invisible: each call makes an attached Herdr client
+  jump in that pane's scrollback and scroll back to the bottom. While the
+  agent is working its own redraws hide this; on an idle pane it is plain
+  to see. Starfleet therefore polls output only while the agent is working,
+  and otherwise reads once per status change. `session.snapshot` does not
+  cause it.
+- The pane `revision` in a snapshot did not change while the agent was
+  printing output, and `pane.read` reported revision 0, so neither can be
+  used to tell whether output changed.
 
 Still unverified:
 

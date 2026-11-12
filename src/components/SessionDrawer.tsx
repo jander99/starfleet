@@ -35,10 +35,14 @@ export function SessionDrawer({ target, onClose }: { target: DrawerTarget; onClo
   const { paneId, linkId, outputAt } = target;
   const [saved, setSaved] = useState<string | null>(null);
 
-  // Poll the output while the drawer is open; a tail is cheap and this view is
-  // the only one that needs it.
+  // Read the output when the drawer opens and whenever the status changes, and
+  // keep polling only while the agent is working. Each `pane.read` makes an
+  // attached Herdr client jump in its scrollback; while the agent works its
+  // own redraws hide that, but on an idle pane it is plainly visible.
+  const { status } = target;
   useEffect(() => {
     if (!paneId) return;
+    const working = status === "working";
     let alive = true;
     const load = () =>
       backend.tail(paneId, 200).then(
@@ -46,12 +50,12 @@ export function SessionDrawer({ target, onClose }: { target: DrawerTarget; onClo
         (e) => alive && setTailError(errorText(e)),
       );
     load();
-    const timer = setInterval(load, 2000);
+    const timer = working ? setInterval(load, 2000) : undefined;
     return () => {
       alive = false;
       clearInterval(timer);
     };
-  }, [paneId]);
+  }, [paneId, status]);
 
   // Once the pane is gone, show what was saved when the agent last stopped.
   useEffect(() => {
