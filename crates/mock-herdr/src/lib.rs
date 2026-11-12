@@ -30,6 +30,8 @@ struct Pane {
     agent: Option<String>,
     name: Option<String>,
     status: &'static str,
+    /// Started but not yet confirmed ready, as while a startup dialog is up.
+    launch_pending: bool,
     transcript: Vec<String>,
 }
 
@@ -103,6 +105,7 @@ impl State {
             agent: None,
             name: None,
             status: "unknown",
+            launch_pending: false,
             transcript: vec![],
         };
         self.panes.push(pane.clone());
@@ -406,6 +409,7 @@ impl MockHerdr {
                         "idle"
                     };
                     p.transcript.push(format!("$ {kind} {}", args.join(" ")));
+                    p.launch_pending = p.status == "blocked";
                     if p.status == "blocked" {
                         p.transcript
                             .push("Do you trust the files in this folder?  1. Yes  2. No".into());
@@ -429,6 +433,14 @@ impl MockHerdr {
                     else {
                         return Err(err("agent_not_found", target));
                     };
+                    // Like the real server: an agent still at its startup dialog
+                    // is "not ready", not "blocked".
+                    if p.launch_pending {
+                        return Err(err(
+                            "agent_not_ready",
+                            &format!("agent {target} is not an active named agent"),
+                        ));
+                    }
                     if p.status == "blocked" {
                         return Err(err("agent_blocked", "agent is blocked"));
                     }
@@ -448,9 +460,12 @@ impl MockHerdr {
             "pane.send_text" | "pane.send_keys" => {
                 let pane_id = str_param(params, "pane_id");
                 let blocked = {
-                    let s = self.state.lock().unwrap();
-                    match s.panes.iter().find(|p| p.pane_id == pane_id) {
-                        Some(p) => p.status == "blocked",
+                    let mut s = self.state.lock().unwrap();
+                    match s.panes.iter_mut().find(|p| p.pane_id == pane_id) {
+                        Some(p) => {
+                            p.launch_pending = false;
+                            p.status == "blocked"
+                        }
                         None => return Err(err("pane_not_found", pane_id)),
                     }
                 };

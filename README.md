@@ -98,7 +98,8 @@ cargo test --workspace
 
 ## Status
 
-Built and tested on Linux against the fake Herdr server, which was written
-from Herdr's published API schema. It has not yet been run against a real
-Herdr server, on Windows, or on macOS. `research/01-herdr.md` lists what
-still needs checking.
+Built and tested on Linux (WSL, then Ubuntu) against the fake Herdr server,
+which was written from Herdr's published API schema. The core has also been
+run against a real Herdr 0.9.5 on Ubuntu: dispatch, prompt delivery and
+status tracking work. It has not yet been run on native Windows or on macOS.
+`research/01-herdr.md` lists what was checked and what still needs checking.
