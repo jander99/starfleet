@@ -5,6 +5,10 @@ import dawn from "../assets/earth/earth-dawn.png";
 import day from "../assets/earth/earth-day.png";
 import dusk from "../assets/earth/earth-dusk.png";
 import night from "../assets/earth/earth-night.png";
+import academy from "../assets/sites/academy.png";
+import daystrom from "../assets/sites/daystrom.png";
+import enterprise from "../assets/sites/enterprise.png";
+import ds9 from "../assets/sites/ds9.png";
 
 const EARTH: Record<Frame, string> = { dawn, day, dusk, night };
 
@@ -19,52 +23,16 @@ function tally(sessions: Session[]): [Status, number][] {
   return order.map((s) => [s, sessions.filter((x) => x.status === s).length] as [Status, number]).filter(([, n]) => n > 0);
 }
 
-const SITES: Record<string, { x: number; y: number; labelY: number }> = {
-  academy: { x: 150, y: 190, labelY: 62 },
-  daystrom: { x: 360, y: 300, labelY: 66 },
-  enterprise: { x: 610, y: 150, labelY: 92 },
-  ds9: { x: 800, y: 380, labelY: 112 },
-};
+/** Map units per sprite pixel; one scale for every sprite keeps the pixels the same size. */
+const SPRITE_SCALE = 2;
 
-function Shapes() {
-  return (
-    <defs>
-      {/* Academy: a colonnaded hall */}
-      <g id="shape-academy">
-        <path d="M-58 34 H58 M-52 34 V-6 M52 34 V-6 M-58 -6 H58 L0 -40 Z" />
-        <path d="M-34 34 V-6 M-16 34 V-6 M16 34 V-6 M34 34 V-6 M0 34 V-6" />
-        <path d="M-66 42 H66" />
-      </g>
-      {/* Daystrom: a research tower with a lattice core */}
-      <g id="shape-daystrom">
-        <path d="M0 -46 L40 -23 V23 L0 46 L-40 23 V-23 Z" />
-        <path d="M0 -46 V46 M-40 -23 L40 23 M40 -23 L-40 23" />
-        <circle r="13" />
-      </g>
-      {/* Enterprise: saucer, neck, secondary hull, nacelles */}
-      <g id="shape-enterprise">
-        <ellipse cx="-34" cy="-24" rx="104" ry="30" />
-        <ellipse cx="-34" cy="-24" rx="62" ry="17" />
-        <ellipse cx="-34" cy="-26" rx="16" ry="5" />
-        <path d="M10 2 L34 26 M36 -4 L58 22" />
-        <ellipse cx="72" cy="38" rx="52" ry="15" />
-        <path d="M70 24 L96 -14 M92 26 L112 -12" />
-        <rect x="52" y="-30" width="118" height="15" rx="7.5" />
-        <path d="M70 -30 V-15" />
-      </g>
-      {/* Deep Space Nine: rings, spokes and docking pylons, from above */}
-      <g id="shape-ds9">
-        <circle r="86" />
-        <circle r="78" />
-        <circle r="42" />
-        <circle r="15" />
-        <path d="M0 -15 V-42 M13 7.5 L36.4 21 M-13 7.5 L-36.4 21" />
-        <path d="M0 -42 V-78 M36.4 21 L67.5 39 M-36.4 21 L-67.5 39" />
-        <path d="M-20 -84 Q0 -112 20 -84 M83 25 Q97 56 63 59 M-83 25 Q-97 56 -63 59" />
-      </g>
-    </defs>
-  );
-}
+/** Where each location sits on the map, its pixel-art sprite and that sprite's size in pixels. */
+const SITES: Record<string, { x: number; y: number; sprite: string; w: number; h: number }> = {
+  academy: { x: 150, y: 190, sprite: academy, w: 120, h: 80 },
+  daystrom: { x: 360, y: 300, sprite: daystrom, w: 80, h: 112 },
+  enterprise: { x: 610, y: 150, sprite: enterprise, w: 160, h: 80 },
+  ds9: { x: 800, y: 380, sprite: ds9, w: 112, h: 112 },
+};
 
 /** Earth in pixel art, lit for the local time, bleeding off the bottom-left corner of the window. */
 function EarthLimb() {
@@ -82,12 +50,13 @@ export function SectorMap(props: { roster: Roster; view: BoardView | null; onOpe
     <div className="map-wrap">
       <EarthLimb />
       <svg className="map" viewBox="0 0 1000 600" role="group" aria-label="Sector map">
-        <Shapes />
-
         {props.roster.locations.map((loc) => {
           const site = SITES[loc.id];
           if (!site) return null;
           const counts = tally(sessionsAt(props.view, `${loc.id}.`));
+          const w = site.w * SPRITE_SCALE;
+          const h = site.h * SPRITE_SCALE;
+          const labelY = h / 2 + 6;
           return (
             <g
               key={loc.id}
@@ -100,17 +69,16 @@ export function SectorMap(props: { roster: Roster; view: BoardView | null; onOpe
               onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && props.onOpen(loc.id)}
             >
               <g className="site-body">
-                <rect className="hit" x="-125" y="-120" width="320" height="250" />
-                <use href={`#shape-${loc.id}`} className="depth" transform="translate(7 9)" />
-                <use href={`#shape-${loc.id}`} className="hull" />
-                <text className="site-name" y={site.labelY + 18}>
+                <rect className="hit" x={-w / 2 - 10} y={-h / 2 - 10} width={w + 20} height={h + 80} />
+                <image className="sprite" href={site.sprite} x={-w / 2} y={-h / 2} width={w} height={h} />
+                <text className="site-name" y={labelY + 18}>
                   {loc.name}
                 </text>
-                <text className="site-sub" y={site.labelY + 36}>
+                <text className="site-sub" y={labelY + 36}>
                   {loc.subtitle} · {loc.stations.length} {loc.stations.length === 1 ? "station" : "stations"}
                 </text>
                 {counts.map(([status, n], i) => (
-                  <g key={status} className={`badge status-${status}`} transform={`translate(${i * 34 - (counts.length - 1) * 17} ${site.labelY + 56})`}>
+                  <g key={status} className={`badge status-${status}`} transform={`translate(${i * 34 - (counts.length - 1) * 17} ${labelY + 56})`}>
                     <rect x="-14" y="-11" width="28" height="20" rx="10" />
                     <text y="4">{n}</text>
                   </g>

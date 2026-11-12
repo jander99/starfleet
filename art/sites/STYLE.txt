@@ -1,0 +1,10 @@
+Shared style for all sector-map sprites:
+- Pixel art, crisp hard-edged pixels, NO anti-aliasing, NO gradients, NO dithering noise.
+- Fully TRANSPARENT background (RGBA PNG, alpha 0 everywhere outside the subject). No stars, no space, no ground plane.
+- 1-pixel dark outline (#05070d) around the silhouette so it reads on a dark starfield.
+- Light comes from the UPPER RIGHT.
+- Shared palette (max ~16 colours): hull/stone greys #1a2236 #2a3756 #44557a #6b7fa6 #9fb0d8 #cfdaf0 #eef3ff,
+  teal accent #62c9d9 / #2f8a99, amber accent #f2a65a / #b8692c, red #ff7a70 / #a83a3a, deep blue #23426b.
+- Subject centred, filling the canvas with ~2px margin.
+- Draw it with a Python script (Pillow is available via: uv run --with pillow python script.py). Keep the script next to the PNG as <name>.py so it can be re-run.
+- After saving, open/inspect the PNG and iterate until the shape is recognisable and correct.
