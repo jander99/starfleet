@@ -1,0 +1,83 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended"
+  ],
+  "timezone": "America/New_York",
+  "schedule": [
+    "before 8am on monday"
+  ],
+  "prConcurrentLimit": 5,
+  "semanticCommits": "enabled",
+  "semanticCommitType": "chore",
+  "semanticCommitScope": "deps",
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": [
+      "before 8am on the first day of the month"
+    ]
+  },
+  "vulnerabilityAlerts": {
+    "schedule": [
+      "at any time"
+    ],
+    "labels": [
+      "security"
+    ]
+  },
+  "packageRules": [
+    {
+      "description": "Majors can break the build; open them from the dashboard when wanted.",
+      "matchUpdateTypes": [
+        "major"
+      ],
+      "dependencyDashboardApproval": true
+    },
+    {
+      "description": "The Tauri JS API, CLI and Rust crates must move together.",
+      "groupName": "tauri",
+      "matchPackageNames": [
+        "/^@tauri-apps//",
+        "/^tauri(-.*)?$/"
+      ]
+    },
+    {
+      "description": "Vitest and its plugins are released in lockstep.",
+      "groupName": "vitest",
+      "matchPackageNames": [
+        "vitest",
+        "/^@vitest//"
+      ]
+    },
+    {
+      "groupName": "react",
+      "matchPackageNames": [
+        "react",
+        "react-dom",
+        "@types/react",
+        "@types/react-dom"
+      ]
+    },
+    {
+      "description": "Group GitHub Actions bumps into one PR.",
+      "groupName": "github actions",
+      "matchManagers": [
+        "github-actions"
+      ]
+    },
+    {
+      "description": "Rust crates that are not Tauri: one PR for minor and patch updates.",
+      "groupName": "rust dependencies",
+      "matchManagers": [
+        "cargo"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "patch"
+      ],
+      "matchPackageNames": [
+        "!/^tauri(-.*)?$/"
+      ]
+    }
+  ]
+}
