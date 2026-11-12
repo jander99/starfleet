@@ -343,3 +343,85 @@ async fn relay_transport_carries_requests_and_events() {
         .unwrap();
     until(&app, "done through relay", |v| v.counts.done == 1).await;
 }
+
+/// An agent still at a startup dialog (a folder trust prompt) is "not ready",
+/// which Herdr reports differently from "blocked". The user must get the same
+/// outcome either way: the prompt is held, nothing is lost, and navigation keys
+/// (not text) are enough to answer, so nothing here depends on one agent's UI.
+#[tokio::test]
+async fn an_agent_at_a_startup_dialog_holds_the_prompt() {
+    let rig = rig().await;
+    let app = rig.app();
+    let card = app
+        .create_card("Fresh folder", &rig.workdir("untrusted-new"), "")
+        .await
+        .unwrap();
+
+    let result = app
+        .dispatch(request(&card, "ds9.bashir", "find the cause"))
+        .await
+        .unwrap();
+    let warning = result.warning.as_deref().unwrap();
+    assert!(warning.contains("waiting on a question"), "{warning}");
+    assert!(
+        !warning.contains("not delivered"),
+        "should not fall back to the generic message: {warning}"
+    );
+    assert!(rig.mock.prompts_received(&result.pane_id).is_empty());
+
+    let view = until(&app, "held prompt on a blocked session", |v| {
+        v.counts.blocked == 1
+    })
+    .await;
+    assert!(view.cards[0].sessions[0].pending_prompt.is_some());
+
+    let refused = app.follow_up(&result.pane_id, "hello").await.unwrap_err();
+    assert!(refused.to_string().contains("waiting on a question"));
+
+    // Answer with keys only, as the UI's Enter/Esc/arrow buttons would.
+    app.reply_keys(&result.pane_id, None, vec!["down".into(), "enter".into()])
+        .await
+        .unwrap();
+    until(&app, "dialog answered", |v| v.counts.blocked == 0).await;
+
+    app.send_pending(&result.link_id).await.unwrap();
+    assert_eq!(rig.mock.prompts_received(&result.pane_id).len(), 1);
+    until(&app, "finished after the held prompt", |v| {
+        let s = &v.cards[0].sessions[0];
+        s.pending_prompt.is_none() && s.status == SessionStatus::Done
+    })
+    .await;
+}
+
+/// An agent that was ready, took the prompt, and then stopped to ask something
+/// is "blocked". Follow-ups are refused with the same usable message.
+#[tokio::test]
+async fn an_agent_that_blocks_mid_task_refuses_follow_ups() {
+    let rig = rig().await;
+    let app = rig.app();
+    let card = app
+        .create_card("Mid-task", &rig.workdir("repo"), "")
+        .await
+        .unwrap();
+
+    let result = app
+        .dispatch(request(&card, "enterprise.riker", "build it [block]"))
+        .await
+        .unwrap();
+    assert!(result.warning.is_none());
+    assert_eq!(rig.mock.prompts_received(&result.pane_id).len(), 1);
+
+    let view = until(&app, "blocked mid-task", |v| v.counts.blocked == 1).await;
+    assert!(view.cards[0].sessions[0].pending_prompt.is_none());
+
+    let refused = app.follow_up(&result.pane_id, "hello").await.unwrap_err();
+    assert!(refused.to_string().contains("waiting on a question"));
+    assert_eq!(rig.mock.prompts_received(&result.pane_id).len(), 1);
+
+    app.reply_keys(&result.pane_id, None, vec!["enter".into()])
+        .await
+        .unwrap();
+    until(&app, "unblocked", |v| v.counts.blocked == 0).await;
+    app.follow_up(&result.pane_id, "carry on").await.unwrap();
+    assert_eq!(rig.mock.prompts_received(&result.pane_id).len(), 2);
+}

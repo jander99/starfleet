@@ -66,6 +66,13 @@ fn non_empty(s: Option<String>) -> Option<String> {
     s.map(|v| v.trim().to_string()).filter(|v| !v.is_empty())
 }
 
+/// Herdr will not take a prompt while the agent is waiting on the user. A
+/// freshly started agent sitting at a startup dialog (such as Claude Code's
+/// folder trust prompt) is reported as `agent_not_ready`, not `agent_blocked`.
+fn awaiting_input(e: &HerdrError) -> bool {
+    matches!(e.code(), Some("agent_blocked" | "agent_not_ready"))
+}
+
 fn parse<T: serde::de::DeserializeOwned>(value: &Value, field: &str) -> Result<T> {
     let inner = value
         .get(field)
@@ -410,11 +417,12 @@ impl Starfleet {
                 json!({ "target": agent.pane_id, "text": text }),
             )
             .await;
-        let warning = delivery.as_ref().err().map(|e| match e.code() {
-            Some("agent_blocked") => {
-                "The agent started but is waiting on a question, so the prompt was held back. Answer it, then send the prompt.".to_string()
+        let warning = delivery.as_ref().err().map(|e| {
+            if awaiting_input(e) {
+                "The agent started but is waiting on a question (for example a folder trust prompt), so the prompt was held back. Answer it, then send the prompt.".to_string()
+            } else {
+                format!("The agent started but the prompt was not delivered: {e}")
             }
-            _ => format!("The agent started but the prompt was not delivered: {e}"),
         });
 
         let link = SessionLink {
@@ -491,7 +499,7 @@ impl Starfleet {
             .await
         {
             Ok(_) => Ok(()),
-            Err(e) if e.code() == Some("agent_blocked") => {
+            Err(e) if awaiting_input(&e) => {
                 bail!("the agent is waiting on a question; answer that first (reply keys, or jump to the pane)")
             }
             Err(e) => Err(e.into()),
@@ -587,4 +595,24 @@ fn subscriptions(pane_ids: &BTreeSet<String>) -> Vec<Value> {
             .map(|id| json!({ "type": "pane.agent_status_changed", "pane_id": id })),
     );
     subs
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn api(code: &str) -> HerdrError {
+        HerdrError::Api {
+            code: code.into(),
+            message: String::new(),
+        }
+    }
+
+    #[test]
+    fn blocked_and_not_ready_agents_hold_the_prompt() {
+        assert!(awaiting_input(&api("agent_blocked")));
+        assert!(awaiting_input(&api("agent_not_ready")));
+        assert!(!awaiting_input(&api("agent_not_found")));
+        assert!(!awaiting_input(&HerdrError::Timeout));
+    }
 }

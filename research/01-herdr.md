@@ -100,22 +100,41 @@ For this project Herdr and the agent CLIs live **inside WSL** on Windows,
 because that is where Claude Code is installed. See
 `03-decisions.md` for how the Windows app reaches it.
 
-## Still to verify against a real Herdr server
+## Checked against a real Herdr server
 
-These could not be tested while building the first version, because the
-build sandbox did not allow running the Herdr binary.
+Run on Ubuntu against Herdr 0.9.5 (protocol 22), in an isolated named
+session. Everything else in this file is still as documented.
 
-1. Accepted values for `agent.start`'s `kind` (assumed to match integration
-   target names such as `claude` and `opencode`).
-2. Whether `agent.prompt` delivers multi-line text as one message. Station
-   briefs are joined to the user's prompt with a blank line.
-3. Whether `pane.updated` fires on every output change (which would make
+1. `agent.start` accepts `kind: claude`. The CLI lists many more kinds
+   (`opencode`, `codex`, `gemini`, ...). **Confirmed** for `claude` only.
+2. `agent.prompt` delivers multi-line text as one message, blank line
+   included. **Confirmed.**
+3. Workspace `tokens` set through `workspace.report_metadata` appear on the
+   workspace in later listings. **Confirmed** while the server runs; not
+   tested across a server restart.
+4. `terminal_id` stayed the same for a pane for as long as it lived.
+   **Confirmed** within one server run.
+5. A real snapshot parses into Starfleet's model unchanged. Workspaces
+   without tokens omit the `tokens` key. **Confirmed.**
+
+Found by running it:
+
+- `agent.start` can succeed while the agent is still at a startup dialog
+  (Claude Code's folder trust prompt). Herdr marks it `launch_pending` and
+  reports status `blocked`. `agent.prompt` then fails with
+  **`agent_not_ready`**, not `agent_blocked`. Starfleet treats both the same
+  way: hold the prompt and tell the user the agent is waiting.
+- That trust prompt has no numbered options (`No, exit` is first and is the
+  default). Typing `1` does nothing; `down` then `enter` answers it. Enter
+  alone chooses `No, exit` and closes the agent.
+
+Still unverified:
+
+1. Whether `pane.updated` fires on every output change (which would make
    that subscription noisy; snapshots are throttled to one per 300 ms).
-4. Whether workspace `tokens` set without a TTL persist, including across a
-   server restart.
-5. Whether `terminal_id` is stable for the life of the server.
-6. Whether single digits sent with `pane.send_text` answer Claude Code's
-   permission menus.
+2. Whether single digits sent with `pane.send_text` answer Claude Code's
+   permission menus (the trust prompt turned out not to be one).
+3. `kind` values other than `claude`, and anything on Windows or macOS.
 
 ## Sources
 
