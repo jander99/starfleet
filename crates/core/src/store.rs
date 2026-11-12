@@ -58,6 +58,23 @@ pub struct SessionLink {
     pub title: Option<String>,
     pub last_status: AgentStatus,
     pub last_seen: Option<u64>,
+    /// The end of the agent's output, saved each time it stops working, so
+    /// the card keeps a record after the pane is gone.
+    pub output: Option<String>,
+    /// When `output` was last read (or found empty).
+    pub output_at: Option<u64>,
+}
+
+/// The most saved output kept per session, in bytes. The end is kept.
+pub const OUTPUT_MAX_BYTES: usize = 32 * 1024;
+
+/// An agent that is not working has finished a turn (or is waiting on the
+/// user), so its output is worth keeping.
+fn settled(status: AgentStatus) -> bool {
+    matches!(
+        status,
+        AgentStatus::Done | AgentStatus::Idle | AgentStatus::Blocked
+    )
 }
 
 impl SessionLink {
@@ -249,12 +266,22 @@ impl Store {
         self.add_link(link)
     }
 
-    /// Refresh every link from a snapshot. Returns whether anything changed.
-    pub fn reconcile(&mut self, snapshot: &Snapshot) -> bool {
+    /// Refresh every link from a snapshot. Returns whether anything changed,
+    /// and the links whose output should be saved now, with their pane ids.
+    pub fn reconcile(&mut self, snapshot: &Snapshot) -> (bool, Vec<(String, String)>) {
         let now = now_ms();
         let mut changed = false;
+        let mut capture = Vec::new();
         for link in &mut self.board.links {
             if let Some(pane) = link.find_live(&snapshot.panes) {
+                // Save when the agent stops working, and once for a settled
+                // session that has never been read (attached by hand, or the
+                // app was not running when it finished).
+                let was = link.last_status;
+                let now_status = pane.agent_status;
+                if settled(now_status) && (was != now_status || link.output_at.is_none()) {
+                    capture.push((link.id.clone(), pane.pane_id.clone()));
+                }
                 if link.absorb(pane) {
                     changed = true;
                     link.last_seen = Some(now);
@@ -271,7 +298,38 @@ impl Store {
             // A failed save is not fatal here: the next change retries.
             let _ = self.save();
         }
-        changed
+        (changed, capture)
+    }
+
+    /// Keep the end of a session's output on its link. Empty output leaves an
+    /// earlier record in place. Returns whether the link still exists.
+    pub fn record_output(&mut self, link_id: &str, text: &str) -> Result<bool> {
+        let Some(link) = self.board.links.iter_mut().find(|l| l.id == link_id) else {
+            return Ok(false);
+        };
+        let text = text.trim_end();
+        if !text.is_empty() {
+            link.output = Some(keep_end(text, OUTPUT_MAX_BYTES).to_string());
+        }
+        link.output_at = Some(now_ms());
+        self.save()?;
+        Ok(true)
+    }
+}
+
+/// The last `max` bytes of `text`, cut at a line start where possible.
+fn keep_end(text: &str, max: usize) -> &str {
+    if text.len() <= max {
+        return text;
+    }
+    let mut start = text.len() - max;
+    while !text.is_char_boundary(start) {
+        start += 1;
+    }
+    let tail = &text[start..];
+    match tail.find('\n') {
+        Some(i) if i + 1 < tail.len() => &tail[i + 1..],
+        _ => tail,
     }
 }
 
@@ -302,6 +360,81 @@ mod tests {
             link.find_live(&[pane("w2:p3", "term_1")]).unwrap().pane_id,
             "w2:p3"
         );
+    }
+
+    fn store_with(link: SessionLink) -> (tempfile::TempDir, Store) {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::load(dir.path().join("board.json")).unwrap();
+        store.board.links.push(link);
+        (dir, store)
+    }
+
+    fn snapshot_with(status: AgentStatus) -> Snapshot {
+        let mut p = pane("w1:p1", "term_1");
+        p.agent_status = status;
+        Snapshot {
+            panes: vec![p],
+            ..Snapshot::default()
+        }
+    }
+
+    #[test]
+    fn output_is_saved_when_the_agent_stops_working() {
+        let link = SessionLink {
+            id: "l1".into(),
+            terminal_id: Some("term_1".into()),
+            last_status: AgentStatus::Working,
+            output_at: Some(1),
+            ..SessionLink::default()
+        };
+        let (_dir, mut store) = store_with(link);
+
+        // Still working: nothing to save.
+        let (_, capture) = store.reconcile(&snapshot_with(AgentStatus::Working));
+        assert!(capture.is_empty());
+
+        // Finished: save it.
+        let (_, capture) = store.reconcile(&snapshot_with(AgentStatus::Done));
+        assert_eq!(capture, vec![("l1".to_string(), "w1:p1".to_string())]);
+        assert!(store.record_output("l1", "all done\n\n").unwrap());
+
+        // Still done, already saved: not again.
+        let (_, capture) = store.reconcile(&snapshot_with(AgentStatus::Done));
+        assert!(capture.is_empty());
+
+        // Looked at (done becomes idle): saved again, since the user may
+        // have typed into the pane.
+        let (_, capture) = store.reconcile(&snapshot_with(AgentStatus::Idle));
+        assert_eq!(capture.len(), 1);
+
+        // An empty read keeps the earlier record.
+        store.record_output("l1", "  \n").unwrap();
+        assert_eq!(store.board.links[0].output.as_deref(), Some("all done"));
+        assert!(!store.record_output("gone", "x").unwrap());
+    }
+
+    #[test]
+    fn a_settled_session_that_was_never_read_is_saved_once() {
+        let link = SessionLink {
+            id: "l1".into(),
+            terminal_id: Some("term_1".into()),
+            last_status: AgentStatus::Done,
+            ..SessionLink::default()
+        };
+        let (_dir, mut store) = store_with(link);
+        let (_, capture) = store.reconcile(&snapshot_with(AgentStatus::Done));
+        assert_eq!(capture.len(), 1);
+        store.record_output("l1", "").unwrap();
+        let (_, capture) = store.reconcile(&snapshot_with(AgentStatus::Done));
+        assert!(capture.is_empty());
+    }
+
+    #[test]
+    fn saved_output_keeps_the_end_at_a_line_start() {
+        assert_eq!(keep_end("short", 100), "short");
+        assert_eq!(keep_end("one\ntwo\nthree", 9), "three");
+        // Never splits a multi-byte character.
+        assert_eq!(keep_end("ééé", 3), "é");
     }
 
     #[test]

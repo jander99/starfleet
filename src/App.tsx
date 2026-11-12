@@ -27,6 +27,7 @@ function drawerTarget(view: BoardView, drawer: Drawer): DrawerTarget | null {
           pendingPrompt: s.pending_prompt,
           cwd: s.cwd,
           lastSeen: s.last_seen,
+          outputAt: s.output_at,
         };
       }
     }
@@ -49,6 +50,7 @@ function drawerTarget(view: BoardView, drawer: Drawer): DrawerTarget | null {
     pendingPrompt: null,
     cwd: c.cwd,
     lastSeen: null,
+    outputAt: null,
   };
 }
 

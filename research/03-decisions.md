@@ -66,6 +66,18 @@ The first dispatch for a card creates a workspace and tags it with the
 card's id. Later dispatches for the same card open a new tab in that
 workspace.
 
+### A finished session leaves its output on the card
+
+Each time a session's agent stops working (done, idle, or blocked on a
+question), Starfleet reads the last 200 lines of the pane and saves them on
+the session's link in the board file, capped at 32 KB. When the pane is
+later closed, the session drawer shows that saved output instead of nothing.
+The board view only carries when it was saved; the text is fetched when the
+drawer opens, to keep the view small.
+
+This is the raw tail only. Output written after the agent's last stop is not
+captured if the pane is closed before it stops again.
+
 ### Stations are presets
 
 A station is: which agent CLI, an optional model, extra arguments, and a
@@ -105,8 +117,8 @@ ever distributed.
 
 ## Deferred
 
-- **What a finished session leaves on its card**: raw tail, a summary, a
-  file, a PR link. Undecided.
+- **More than the raw tail on a card**: a summary (possibly from
+  claude-mem), a file, a PR link. The raw tail is saved today.
 - **Autonomy**: whether the app ever acts on its own (answering a blocked
   agent, choosing an agent). For now it only acts on a click.
 - **Where unassigned sessions sit in the UI**: currently a side tray on the

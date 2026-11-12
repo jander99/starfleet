@@ -13,6 +13,8 @@ export interface DrawerTarget {
   pendingPrompt: string | null;
   cwd: string | null;
   lastSeen: number | null;
+  /** When output was last saved for this session; null if none. */
+  outputAt: number | null;
 }
 
 const REPLY_KEYS: { label: string; text: string | null; keys: string[] }[] = [
@@ -30,7 +32,8 @@ export function SessionDrawer({ target, onClose }: { target: DrawerTarget; onClo
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const output = useRef<HTMLPreElement>(null);
-  const { paneId } = target;
+  const { paneId, linkId, outputAt } = target;
+  const [saved, setSaved] = useState<string | null>(null);
 
   // Poll the output while the drawer is open; a tail is cheap and this view is
   // the only one that needs it.
@@ -50,10 +53,23 @@ export function SessionDrawer({ target, onClose }: { target: DrawerTarget; onClo
     };
   }, [paneId]);
 
+  // Once the pane is gone, show what was saved when the agent last stopped.
+  useEffect(() => {
+    if (paneId || !linkId || !outputAt) return;
+    let alive = true;
+    backend.savedOutput(linkId).then(
+      (text) => alive && (setSaved(text), setTailError(null)),
+      (e) => alive && setTailError(errorText(e)),
+    );
+    return () => {
+      alive = false;
+    };
+  }, [paneId, linkId, outputAt]);
+
   useEffect(() => {
     const el = output.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [tail]);
+  }, [tail, saved]);
 
   const act = (p: Promise<unknown>, done?: string) =>
     p.then(
@@ -102,8 +118,15 @@ export function SessionDrawer({ target, onClose }: { target: DrawerTarget; onClo
         <pre className="output" ref={output} tabIndex={0}>
           {tailError ?? tail ?? "Loading output…"}
         </pre>
+      ) : outputAt ? (
+        <>
+          <p className="muted saved-note">Saved when the agent last stopped, {timeAgo(outputAt)}.</p>
+          <pre className="output" ref={output} tabIndex={0}>
+            {tailError ?? saved ?? "Loading saved output…"}
+          </pre>
+        </>
       ) : (
-        <p className="empty">This session is no longer running in Herdr, so there is no output to show.</p>
+        <p className="empty">This session is no longer running in Herdr, and no output was saved for it.</p>
       )}
 
       {paneId && target.pendingPrompt && target.linkId && (

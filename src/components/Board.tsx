@@ -14,6 +14,7 @@ function SessionRow({ session, onOpen }: { session: Session; onOpen: () => void 
           </span>
           {session.prompt && <span className="session-prompt ellipsis">{session.prompt}</span>}
           {session.pending_prompt && <span className="held">Prompt held back, waiting on the agent</span>}
+          {!session.live && session.output_at && <span className="muted">Output saved</span>}
         </span>
       </button>
     </li>

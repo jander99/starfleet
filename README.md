@@ -18,6 +18,8 @@ This is a personal tool and an early first version.
   Herdr show up as unassigned and can be attached to a card.
 - **Session view**: live output tail, follow-up message, reply keys for a
   blocked agent, and a button that brings the pane to the front in Herdr.
+  When an agent stops working its output is saved on the card, so a closed
+  session still shows what it said.
 - **System check**: verifies Herdr, Claude Code, OpenCode and claude-mem in
   the environment where the agents run (WSL, when on Windows).
 

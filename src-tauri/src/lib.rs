@@ -121,6 +121,11 @@ async fn tail(core: State<'_, Core>, pane_id: String, lines: u32) -> CmdResult<S
 }
 
 #[tauri::command]
+fn saved_output(core: State<Core>, link_id: String) -> CmdResult<Option<String>> {
+    core.get()?.saved_output(&link_id).map_err(text)
+}
+
+#[tauri::command]
 async fn focus(core: State<'_, Core>, pane_id: String) -> CmdResult<()> {
     core.get()?.focus(&pane_id).await.map_err(text)
 }
@@ -166,6 +171,7 @@ pub fn run() {
             follow_up,
             reply_keys,
             tail,
+            saved_output,
             focus
         ])
         .run(tauri::generate_context!())
