@@ -32,7 +32,21 @@ This is a personal tool and an early first version.
 - On Windows: WSL, with Herdr and the agent CLIs installed inside it, plus
   one of `socat`, `python3` or `nc` there.
 
-## Run it
+## Install it
+
+From a checkout, build and install for your user:
+
+```bash
+tools/install.sh
+```
+
+This builds a release binary and puts `starfleet` in `~/.local/bin` (set
+`BIN_DIR` to change that). On Linux it also adds an application-menu entry
+and icon. Run it again after `git pull` to update, and
+`tools/install.sh --uninstall` to remove it. Your board and settings are
+left alone.
+
+## Run it from source
 
 ```bash
 npm install
