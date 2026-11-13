@@ -578,12 +578,12 @@ impl Starfleet {
                 json!({ "pane_id": pane_id, "source": "recent", "lines": lines, "format": "text", "strip_ansi": true }),
             )
             .await?;
-        Ok(result
+        let text = result
             .get("read")
             .and_then(|r| r.get("text"))
             .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_string())
+            .unwrap_or_default();
+        Ok(without_rules(text))
     }
 
     /// Bring a session to the front in whatever Herdr client is attached.
@@ -605,6 +605,20 @@ impl Starfleet {
             .await?;
         Ok(())
     }
+}
+
+/// Drop the horizontal rules agent UIs draw around their input box. Only runs
+/// of eight or more box-drawing characters count, so dashes in real output
+/// survive.
+fn without_rules(text: &str) -> String {
+    let is_rule = |line: &str| {
+        let line = line.trim();
+        line.chars().count() >= 8 && line.chars().all(|c| ('\u{2500}'..='\u{257F}').contains(&c))
+    };
+    text.lines()
+        .filter(|l| !is_rule(l))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn subscriptions(pane_ids: &BTreeSet<String>) -> Vec<Value> {
@@ -650,5 +664,16 @@ mod tests {
         assert!(awaiting_input(&api("agent_not_ready")));
         assert!(!awaiting_input(&api("agent_not_found")));
         assert!(!awaiting_input(&HerdrError::Timeout));
+    }
+
+    #[test]
+    fn rule_lines_are_dropped_from_output() {
+        let raw = "reply\n────────────────────\n❯ next\n────────────────────\n  status\n";
+        assert_eq!(without_rules(raw), "reply\n❯ next\n  status");
+        // Short runs and ordinary dashes are text, not rules.
+        assert_eq!(
+            without_rules("───\n---------\na - b"),
+            "───\n---------\na - b"
+        );
     }
 }

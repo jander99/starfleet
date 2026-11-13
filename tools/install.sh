@@ -60,7 +60,8 @@ Type=Application
 Name=Starfleet
 Comment=Control room for AI coding agents running in Herdr
 Exec=$BIN
-Icon=starfleet
+Icon=$ICON
+StartupWMClass=Starfleet
 Terminal=false
 Categories=Development;
 EOF
