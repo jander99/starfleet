@@ -111,7 +111,8 @@ everything under one folder.
   raw Earth frames). The app uses the processed copies in `src/assets/`.
 - `tools/`: `install.sh`, and `prep-earth.py`, which turns the raw Earth
   frames into app assets.
-- `research/`: notes from the initial research and the decisions made.
+- `research/`: notes from the initial research and the decisions made,
+  plus `04-collaboration.md` on getting agent sessions to work together.
 
 ## Tests
 
