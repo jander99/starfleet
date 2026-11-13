@@ -583,7 +583,7 @@ impl Starfleet {
             .and_then(|r| r.get("text"))
             .and_then(Value::as_str)
             .unwrap_or_default();
-        Ok(without_rules(text))
+        Ok(without_chrome(text))
     }
 
     /// Bring a session to the front in whatever Herdr client is attached.
@@ -607,18 +607,55 @@ impl Starfleet {
     }
 }
 
-/// Drop the horizontal rules agent UIs draw around their input box. Only runs
-/// of eight or more box-drawing characters count, so dashes in real output
-/// survive.
-fn without_rules(text: &str) -> String {
+/// Claude Code's status line: a spinner glyph, then a verb that reads
+/// "Churned for 3m 22s" when the turn is over or "Frolicking… (50s · …)"
+/// while it runs. The input box, tips and footer all come after it.
+fn is_status_line(line: &str) -> bool {
+    const SPINNERS: &str = "·✢✳✶✻✽✺❋*";
+    let mut chars = line.trim().chars();
+    if !chars.next().is_some_and(|c| SPINNERS.contains(c)) {
+        return false;
+    }
+    let rest = chars.as_str().trim_start();
+    let word_end = rest
+        .find(|c: char| !c.is_alphabetic())
+        .unwrap_or(rest.len());
+    let (word, after) = rest.split_at(word_end);
+    if !word.chars().next().is_some_and(char::is_uppercase) {
+        return false;
+    }
+    if let Some(r) = after.strip_prefix(" for ") {
+        return r.starts_with(|c: char| c.is_ascii_digit());
+    }
+    after
+        .strip_prefix('…')
+        .or_else(|| after.strip_prefix("..."))
+        .is_some_and(|r| r.trim().is_empty() || r.trim_start().starts_with('('))
+}
+
+/// Remove the agent UI's own chrome from a pane read: everything from the
+/// last status line on (see `is_status_line`), and any long horizontal rule
+/// left elsewhere. Only runs of eight or more box-drawing characters count as
+/// rules, so dashes in real output survive. Output with no status line, such
+/// as from another agent CLI, is kept whole.
+fn without_chrome(text: &str) -> String {
     let is_rule = |line: &str| {
         let line = line.trim();
         line.chars().count() >= 8 && line.chars().all(|c| ('\u{2500}'..='\u{257F}').contains(&c))
     };
-    text.lines()
+    let lines: Vec<&str> = text.lines().collect();
+    let end = lines
+        .iter()
+        .rposition(|l| is_status_line(l))
+        .unwrap_or(lines.len());
+    lines[..end]
+        .iter()
         .filter(|l| !is_rule(l))
+        .copied()
         .collect::<Vec<_>>()
         .join("\n")
+        .trim_end()
+        .to_string()
 }
 
 fn subscriptions(pane_ids: &BTreeSet<String>) -> Vec<Value> {
@@ -669,11 +706,39 @@ mod tests {
     #[test]
     fn rule_lines_are_dropped_from_output() {
         let raw = "reply\n────────────────────\n❯ next\n────────────────────\n  status\n";
-        assert_eq!(without_rules(raw), "reply\n❯ next\n  status");
+        assert_eq!(without_chrome(raw), "reply\n❯ next\n  status");
         // Short runs and ordinary dashes are text, not rules.
         assert_eq!(
-            without_rules("───\n---------\na - b"),
+            without_chrome("───\n---------\na - b"),
             "───\n---------\na - b"
         );
+    }
+
+    #[test]
+    fn output_ends_at_the_claude_status_line() {
+        let done = "answer\n\n✻ Churned for 3m 22s · done 6:58 PM\n\n※ recap: x\n──────────\n❯ hi\n──────────\n  ⏵⏵ auto mode on";
+        assert_eq!(without_chrome(done), "answer");
+        let working =
+            "● Called tool\n\n✶ Frolicking… (50s · ↓ 4.7k tokens)\n  ⎿  Tip: x\n──────────\n❯";
+        assert_eq!(without_chrome(working), "● Called tool");
+        // The last status line wins, so earlier turns stay.
+        let two = "a\n✻ Baked for 5s\nb\n✻ Cooked for 1m 2s\n❯";
+        assert_eq!(without_chrome(two), "a\n✻ Baked for 5s\nb");
+    }
+
+    #[test]
+    fn ordinary_lines_are_not_status_lines() {
+        for line in [
+            "● Done for 3 reasons",
+            "  ⎿  Running…",
+            "✻ lowercase for 3s",
+            "Churned for 3m",
+            "* Note: for 3 days",
+            "- Fixed… (see below)",
+        ] {
+            assert!(!is_status_line(line), "{line}");
+        }
+        let text = "● Added a thing\n  ⎿  Running…\nplain output";
+        assert_eq!(without_chrome(text), text);
     }
 }
