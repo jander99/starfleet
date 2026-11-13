@@ -46,6 +46,9 @@ and icon. Run it again after `git pull` to update, and
 `tools/install.sh --uninstall` to remove it. Your board and settings are
 left alone.
 
+Started from a terminal, `starfleet` detaches and gives the prompt back.
+Pass `--foreground` to keep it attached, for example to see its log output.
+
 ## Run it from source
 
 ```bash
