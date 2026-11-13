@@ -107,6 +107,10 @@ everything under one folder.
 - `crates/mock-herdr`: the fake Herdr server.
 - `src-tauri`: the desktop shell.
 - `src`: the React front end.
+- `art/`: sources for the pixel art (the generator scripts, style guide and
+  raw Earth frames). The app uses the processed copies in `src/assets/`.
+- `tools/`: `install.sh`, and `prep-earth.py`, which turns the raw Earth
+  frames into app assets.
 - `research/`: notes from the initial research and the decisions made.
 
 ## Tests
