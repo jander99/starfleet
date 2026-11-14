@@ -141,6 +141,10 @@ ever distributed.
 
 ## Deferred
 
+The [feature inventory](../docs/features.md) collects proposed follow-up work
+and dependencies. Listing a feature does not resolve these decisions or
+authorize implementation.
+
 - **More than the tail on a card**: a summary (possibly from claude-mem), a
   file, a PR link. The cleaned tail is saved today.
 - **Autonomy**: whether the app ever acts on its own (answering a blocked
