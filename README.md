@@ -113,6 +113,8 @@ everything under one folder.
   frames into app assets.
 - `research/`: notes from the initial research and the decisions made,
   plus `04-collaboration.md` on getting agent sessions to work together.
+- [Feature inventory](docs/features.md): proposed work, dependencies and
+  decisions still requiring approval.
 
 ## Tests
 

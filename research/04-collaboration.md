@@ -7,6 +7,12 @@ work on a common problem?
 Claims are marked **documented** (Claude Code or Herdr docs), **seen** (looked
 at on this machine), or **unverified**.
 
+Updated November 13, 2026 against the
+[agent-swarm research](../reports/Agent%20swarm%20orchestration%20patterns.md).
+This update refines design implications; it does not reverify external API
+claims or approve implementation. Section 5 supersedes the initial Claude-only
+recommendation; section 6 adds the reliability requirements.
+
 ## Four ways to do it
 
 | Route | Who talks | Works for | Starfleet effort |
@@ -16,8 +22,8 @@ at on this machine), or **unverified**.
 | Starfleet as a relay | Starfleet reads one pane, prompts another | any agent CLI | medium: a relay rule engine |
 | A shared file on the card | agents read and write a file | any agent CLI | small, but nobody gets woken up |
 
-They combine. The recommendation at the end uses the first and fourth now,
-and the third later.
+These routes can combine. The initial recommendation below is retained for
+context; section 5 replaces it with a cross-harness proposal.
 
 ## 1. Claude Code cross-session messaging
 
@@ -63,8 +69,8 @@ Built into Claude Code since v2.1.224 and on by default. (documented)
 - **Plain text only, about 1M characters max.** No files; send paths and
   let the receiver read them. (documented)
 - **Loops are throttled.** Bursts are refused at the sender, identical
-  repeats are dropped, and at most 50 messages queue. Two agents arguing
-  forever stops on its own. (documented)
+  repeats are dropped, and at most 50 messages queue. (documented) These
+  controls do not establish a bound on total exchanges, runtime or spend.
 - **Every delivered message costs tokens** like a typed prompt. (documented)
 - **OpenCode sessions are left out.** They have no inbox.
 
@@ -127,7 +133,7 @@ it. Keep it out of git or in `.gitignore`.
 claude-mem is not a substitute: its notes are per project and written after
 the fact by its worker, not something agents address to each other.
 
-## Recommendation
+## Initial recommendation (superseded by section 5)
 
 **Now (small change):** make Claude Code's own messaging usable on a card.
 
@@ -150,9 +156,8 @@ sessions about a newcomer with a short `agent.prompt` (a click-driven
 action, so no autonomy decision needed), or rely on agents running
 `ListAgents`, which lists every local session.
 
-**Later:** relay rules (route 3) once the autonomy question is settled. They
-are the only route that includes OpenCode agents. Section 5 replaces this
-with something better.
+**Later, in this initial proposal:** relay rules (route 3) once the autonomy
+question is settled. Section 5 replaces this with cross-harness comms.
 
 ## 5. Across harnesses: picking the right tool and still talking
 
@@ -204,7 +209,7 @@ goes there, not into each harness.
   socket (for example `$XDG_RUNTIME_DIR/starfleet/comms.sock`).
 - **Installed once, globally, per harness.** Outside a Starfleet-managed
   pane (no `HERDR_PANE_ID`, or a pane not on any card) the server offers no
-  tools, so it costs nothing elsewhere.
+  collaboration tools. MCP startup/configuration overhead still needs measuring.
 - **Starfleet routes and records.** Routing, queueing and permission live
   in the core, where the board is. Every message goes into the card's log,
   so the user sees the conversation.
@@ -238,8 +243,9 @@ Answer with the starfleet comms `reply` tool, not in chat.
 - Target `blocked`: hold, and show it on the board, since the user has to
   answer the menu first.
 
-Claude Code to Claude Code can keep using `SendMessage` as well; comms adds
-nothing there except the board log.
+Claude Code to Claude Code can also use `SendMessage`, but that bypasses the
+proposed comms log and controls. Whether managed collaboration may use this
+path is an open policy decision.
 
 ### Calling in another harness: the image case
 
@@ -252,10 +258,12 @@ nothing there except the board log.
    ticket straight away; Riker keeps working or ends its turn.
 3. Starfleet dispatches the Holodeck on the same card, in a new tab, with
    the brief, the request, and the requester's name.
-4. The Holodeck calls `reply("done", ["art/sites/ds9.png"])`. If it stops
-   without replying, Starfleet sends its saved output tail instead.
+4. The Holodeck replies with the artifact, outcome and evidence. If it stops
+   without replying, Starfleet marks the request as missing a result and makes
+   its saved output available for diagnosis, not as a successful reply.
 5. Starfleet delivers the reply to Riker as a message, which wakes it if
-   idle. The ticket closes on the board.
+   idle. The ticket records response delivery, not verification, acceptance or
+   integration. Those are separate states and decisions.
 
 The same path covers "second opinion from GPT on this diff", "have Codex
 review", or a Claude reviewer for an OpenCode implementer.
@@ -283,16 +291,19 @@ This is agents acting without a click, the "Autonomy" item deferred in
 - **Requests**: a card setting of off, ask (a prompt on the board), or
   allowed for named stations only. Default: ask.
 - **Budget**: a cap on messages and helper sessions per card per hour,
-  plus a hop limit on reply chains, on top of Claude Code's own loop
-  throttling.
+  plus a hop limit on reply chains. Traffic limits do not bound tokens, spend,
+  runtime or concurrent execution; those need separate controls.
 - **No permission laundering**: a helper is never started in a looser
   permission mode than the session that asked for it. A Claude session
   that would be prompted before running a command must not get the same
   command run by an OpenCode helper that auto-approves. Stations carry
-  their permission posture, and `request` refuses a looser one.
+  their permission posture, and `request` refuses a looser one. Cross-harness
+  comparison must cover actual tools, credentials and resource access, not
+  permission-mode names. Unknown equivalence requires approval or refusal.
 - **Messages arrive as user input** in harnesses without a native peer
   concept, so the framing and the board log are the only markers. Treat
-  this as the main risk of the design.
+  this as the main risk of the design. Peer text must not gain user authority;
+  framing and logs alone cannot enforce that boundary.
 
 ## Recommendation, revised
 
@@ -303,9 +314,52 @@ This is agents acting without a click, the "Autonomy" item deferred in
    depends on it.
 2. **Name sessions and add the crew paragraph** (section above): small, and
    useful on its own for Claude-only cards.
-3. **Build `starfleet comms`** with `crew`, `send` and `reply` first, and
-   delivery with queuing. Then `stations` and `request` with the
-   capability field and the guard rails.
+3. **Define the request/result contract and approval policy**, then propose
+   `starfleet comms` with `crew`, `send`, `reply` and queued delivery. Add
+   `stations` and `request` with durable tickets and execution controls. This
+   is a candidate sequence, not build authorization.
+
+## 6. Messaging is not reliable delegation
+
+The [swarm research](../reports/Agent%20swarm%20orchestration%20patterns.md)
+supports the transport direction but adds requirements messaging alone cannot
+satisfy. These are recommendations, not implemented Starfleet guarantees.
+
+- **Ownership:** the requester owns continuation. Same-card membership does
+  not assign responsibility for an objective. A permanent orchestrator is not
+  necessary for the first bounded exchange.
+- **Contract:** persist task, parent and attempt identity, objective, exclusions,
+  context, expected artifacts, acceptance criteria and limits. Results include
+  an outcome, artifacts, checks/results, deviations, blockers and risks. The
+  tool signatures above are sketches, not a finalized protocol.
+- **Correlation:** replies identify their request explicitly. A session may
+  receive multiple requests; "the request that started me" is insufficient.
+- **Lifecycle:** distinguish execution stopped, result submitted, response
+  delivered, verified, accepted and integrated. Represent blocked, failed,
+  canceled, expired and exhausted attempts. A truncated tail, possibly captured
+  while blocked, is not completion evidence.
+- **Recovery:** persist requests, queued messages and attempts. Reconcile live
+  sessions and uncertain delivery after restart before retrying side effects.
+  Detect abandoned helpers and expired deadlines. Cancellation does not undo
+  effects or prove a process stopped.
+- **Limits:** enforce deadlines, concurrency, retries, descendant-wide limits
+  and cancellation outside prompts. Check available usage telemetry before
+  promising hard spend caps.
+- **Workspace safety:** current sessions share the card's folder. Concurrent
+  code writers need separate worktrees/clones, recorded base revisions and
+  controlled integration. Worktrees do not isolate credentials or services.
+- **Evidence:** inspect actual artifacts against requirements, not just author
+  explanations. Bind checks and approvals to revisions or hashes; relevant
+  changes invalidate verdicts. Verification is not automatic user acceptance.
+- **Enforcement boundary:** direct Herdr launches and native peer messages can
+  bypass comms. Specify guarantees for managed requests and which underlying
+  capabilities must be restricted for stronger guarantees.
+
+Define the contract and manually test one exchange before polished agent
+instructions. Build the minimum reliable loop before autonomous use; add writer
+isolation and revision-bound verification before concurrent coding. Keep broader
+hierarchy and automatic acceptance deferred. Proposed capabilities and open
+decisions are tracked in [the feature inventory](../docs/features.md).
 
 ## To verify before building
 
