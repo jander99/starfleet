@@ -47,7 +47,8 @@ fn check(
 fn find_tool_script(name: &str) -> String {
     format!(
         "PATH=\"$PATH:$HOME/.local/bin:$HOME/bin:$HOME/.cargo/bin:/usr/local/bin:/opt/homebrew/bin:\
-$HOME/.bun/bin:$HOME/.npm-global/bin:$HOME/.opencode/bin:$HOME/.claude/local\"; \
+$HOME/.bun/bin:$HOME/.npm-global/bin:$HOME/.opencode/bin:$HOME/.claude/local:\
+/home/linuxbrew/.linuxbrew/bin:$HOME/.linuxbrew/bin\"; \
 p=$(command -v {name} 2>/dev/null); \
 if [ ! -x \"$p\" ]; then p=$(bash -lic 'command -v {name}' 2>/dev/null | tail -n 1); fi; \
 [ -x \"$p\" ] || exit 1; echo \"$p\"; \"$p\" --version 2>/dev/null | head -n 1"
