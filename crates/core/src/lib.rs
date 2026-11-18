@@ -6,6 +6,7 @@
 pub mod app;
 pub mod env;
 pub mod herdr;
+pub mod log;
 pub mod paths;
 pub mod preflight;
 pub mod project;
