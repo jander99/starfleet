@@ -138,12 +138,16 @@ pub fn resume_chain(links: &[SessionLink], start: &str) -> Vec<String> {
     let mut chain = Vec::new();
     let mut current = start;
     while chain.len() < 1000 {
-        let Some(link) = by_id.get(current) else { break };
+        let Some(link) = by_id.get(current) else {
+            break;
+        };
         if !visited.insert(link.id.clone()) {
             break;
         }
         chain.push(link.id.clone());
-        let Some(next) = link.resumed_from.as_deref() else { break };
+        let Some(next) = link.resumed_from.as_deref() else {
+            break;
+        };
         current = next;
     }
     chain
@@ -449,7 +453,10 @@ impl Store {
             .filter(|l| l.last_status != AgentStatus::Blocked)
             // saturating: a wrapping add would make a far-future last_seen
             // look long overdue and park a session that just ran.
-            .filter(|l| l.last_seen.is_some_and(|t| t.saturating_add(idle_ms) <= now))
+            .filter(|l| {
+                l.last_seen
+                    .is_some_and(|t| t.saturating_add(idle_ms) <= now)
+            })
             .map(|l| l.id.clone())
             .collect()
     }
@@ -541,7 +548,10 @@ mod tests {
         for (json, expected) in cases {
             assert_eq!(serde_json::from_str::<EndReason>(json).unwrap(), expected);
         }
-        assert_eq!(serde_json::to_string(&EndReason::IdleTimeout).unwrap(), "\"idle_timeout\"");
+        assert_eq!(
+            serde_json::to_string(&EndReason::IdleTimeout).unwrap(),
+            "\"idle_timeout\""
+        );
     }
 
     #[test]
@@ -563,7 +573,9 @@ mod tests {
                 },
             )
             .unwrap();
-        store.update_artifact(&card.id, "a1", Some("ci_running"), Some(42)).unwrap();
+        store
+            .update_artifact(&card.id, "a1", Some("ci_running"), Some(42))
+            .unwrap();
         let reloaded = Store::load(file).unwrap();
         let a = &reloaded.card(&card.id).unwrap().artifacts[0];
         assert_eq!(a.last_status.as_deref(), Some("ci_running"));
@@ -575,17 +587,34 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut store = Store::load(dir.path().join("board.json")).unwrap();
         let card = store.create_card("c", "/w", "").unwrap();
-        assert!(store.update_artifact(&card.id, "nope", Some("x"), None).is_err());
+        assert!(store
+            .update_artifact(&card.id, "nope", Some("x"), None)
+            .is_err());
     }
 
     #[test]
     fn the_resume_chain_stops_at_a_dangling_id() {
         let links = vec![
-            SessionLink { id: "a".into(), resumed_from: None, ..Default::default() },
-            SessionLink { id: "b".into(), resumed_from: Some("a".into()), ..Default::default() },
-            SessionLink { id: "c".into(), resumed_from: Some("missing".into()), ..Default::default() },
+            SessionLink {
+                id: "a".into(),
+                resumed_from: None,
+                ..Default::default()
+            },
+            SessionLink {
+                id: "b".into(),
+                resumed_from: Some("a".into()),
+                ..Default::default()
+            },
+            SessionLink {
+                id: "c".into(),
+                resumed_from: Some("missing".into()),
+                ..Default::default()
+            },
         ];
-        assert_eq!(resume_chain(&links, "b"), vec!["b".to_string(), "a".to_string()]);
+        assert_eq!(
+            resume_chain(&links, "b"),
+            vec!["b".to_string(), "a".to_string()]
+        );
         assert_eq!(resume_chain(&links, "c"), vec!["c".to_string()]);
         assert_eq!(resume_chain(&links, "nope"), Vec::<String>::new());
     }
@@ -593,8 +622,16 @@ mod tests {
     #[test]
     fn a_cyclic_resume_chain_does_not_loop() {
         let links = vec![
-            SessionLink { id: "a".into(), resumed_from: Some("b".into()), ..Default::default() },
-            SessionLink { id: "b".into(), resumed_from: Some("a".into()), ..Default::default() },
+            SessionLink {
+                id: "a".into(),
+                resumed_from: Some("b".into()),
+                ..Default::default()
+            },
+            SessionLink {
+                id: "b".into(),
+                resumed_from: Some("a".into()),
+                ..Default::default()
+            },
         ];
         let chain = resume_chain(&links, "a");
         assert_eq!(chain.len(), 2);
@@ -624,7 +661,10 @@ mod tests {
             store.board.links.push(link);
         }
         // now is past old's idle deadline (0 + 3_600_000) but not fresh's (1_000_000 + 3_600_000).
-        assert_eq!(store.park_candidates(4_000_000, 3_600_000), vec!["old".to_string()]);
+        assert_eq!(
+            store.park_candidates(4_000_000, 3_600_000),
+            vec!["old".to_string()]
+        );
     }
 
     #[test]
@@ -652,7 +692,10 @@ mod tests {
             ..Default::default()
         });
         // The documented rule is `t + idle_ms <= now`: exactly at the deadline counts.
-        assert_eq!(store.park_candidates(4_000, 3_000), vec!["edge".to_string()]);
+        assert_eq!(
+            store.park_candidates(4_000, 3_000),
+            vec!["edge".to_string()]
+        );
         assert!(store.park_candidates(3_999, 3_000).is_empty());
     }
 
@@ -661,7 +704,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("board.json");
         let mut store = Store::load(file.clone()).unwrap();
-        store.board.links.push(SessionLink { id: "l1".into(), ..Default::default() });
+        store.board.links.push(SessionLink {
+            id: "l1".into(),
+            ..Default::default()
+        });
         store.end_session("l1", EndReason::IdleTimeout).unwrap();
         let reloaded = Store::load(file).unwrap();
         let link = &reloaded.board.links[0];

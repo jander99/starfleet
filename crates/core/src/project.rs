@@ -57,7 +57,9 @@ fn child_repos(path: &Path) -> usize {
 pub fn project_kind(path: &Path) -> ProjectKind {
     let is_root = is_git_root(path);
     let children = child_repos(path);
-    let parent_is_meta = path.parent().is_some_and(|p| !is_git_root(p) && child_repos(p) >= 2);
+    let parent_is_meta = path
+        .parent()
+        .is_some_and(|p| !is_git_root(p) && child_repos(p) >= 2);
     classify(is_root, children, parent_is_meta)
 }
 
@@ -83,7 +85,10 @@ mod tests {
             std::fs::create_dir_all(dir.path().join(name).join(".git")).unwrap();
         }
         assert_eq!(project_kind(dir.path()), ProjectKind::Meta);
-        assert_eq!(project_kind(&dir.path().join("svc-a")), ProjectKind::RepoInMeta);
+        assert_eq!(
+            project_kind(&dir.path().join("svc-a")),
+            ProjectKind::RepoInMeta
+        );
         // Totality: missing path and a file are treated as a single project.
         assert_eq!(project_kind(&dir.path().join("missing")), ProjectKind::Repo);
         let file = dir.path().join("a.txt");

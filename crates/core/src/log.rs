@@ -46,7 +46,10 @@ pub fn append(paths: &Paths, card_id: &str, entry: &LogEntry) -> Result<()> {
         Ok(bytes) => bytes.last().is_some_and(|b| *b != b'\n'),
         Err(_) => false,
     };
-    let mut out = std::fs::OpenOptions::new().create(true).append(true).open(&file)?;
+    let mut out = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&file)?;
     if needs_newline {
         out.write_all(b"\n")?;
     }
@@ -81,11 +84,24 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let paths = Paths::at(dir.path());
         let e = LogEntry {
-            id: "1".into(), owner: "captain".into(), at: 5, kind: "note".into(),
-            text: "waiting on PR #25".into(), links: vec![], session_id: None,
+            id: "1".into(),
+            owner: "captain".into(),
+            at: 5,
+            kind: "note".into(),
+            text: "waiting on PR #25".into(),
+            links: vec![],
+            session_id: None,
         };
         append(&paths, "c1", &e).unwrap();
-        append(&paths, "c1", &LogEntry { id: "2".into(), ..e.clone() }).unwrap();
+        append(
+            &paths,
+            "c1",
+            &LogEntry {
+                id: "2".into(),
+                ..e.clone()
+            },
+        )
+        .unwrap();
         // A half-written line (crash mid-append) must not break the read.
         let file = paths.log_file("c1");
         let raw = std::fs::read_to_string(&file).unwrap();
@@ -94,7 +110,15 @@ mod tests {
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0].text, "waiting on PR #25");
         // Appending after the torn line must not lose the new entry.
-        append(&paths, "c1", &LogEntry { id: "4".into(), ..e.clone() }).unwrap();
+        append(
+            &paths,
+            "c1",
+            &LogEntry {
+                id: "4".into(),
+                ..e.clone()
+            },
+        )
+        .unwrap();
         assert_eq!(read(&paths, "c1").unwrap().len(), 3);
     }
 
@@ -111,12 +135,21 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let paths = Paths::at(dir.path());
         let captain = LogEntry {
-            id: "1".into(), owner: "captain".into(), at: 1, kind: "note".into(),
-            text: "started the fleet refactor".into(), links: vec![], session_id: None,
+            id: "1".into(),
+            owner: "captain".into(),
+            at: 1,
+            kind: "note".into(),
+            text: "started the fleet refactor".into(),
+            links: vec![],
+            session_id: None,
         };
         let agent = LogEntry {
-            id: "2".into(), owner: "barclay".into(), at: 2, kind: "result".into(),
-            text: "PR opened".into(), links: vec!["https://example.test/pr/1".into()],
+            id: "2".into(),
+            owner: "barclay".into(),
+            at: 2,
+            kind: "result".into(),
+            text: "PR opened".into(),
+            links: vec!["https://example.test/pr/1".into()],
             session_id: Some("l1".into()),
         };
         append(&paths, "c1", &captain).unwrap();

@@ -114,7 +114,10 @@ pub fn card_state(sessions: &[SessionState]) -> CardState {
     else {
         return CardState::Empty;
     };
-    if sessions.iter().any(|s| s.live && s.status == SessionStatus::Blocked) {
+    if sessions
+        .iter()
+        .any(|s| s.live && s.status == SessionStatus::Blocked)
+    {
         return CardState::Blocked;
     }
     if newest.live {
@@ -357,7 +360,13 @@ mod tests {
 
     #[test]
     fn the_newest_session_decides_the_card_state() {
-        let older = ss("l2", 10, false, SessionStatus::Offline, Some(EndReason::Interrupted));
+        let older = ss(
+            "l2",
+            10,
+            false,
+            SessionStatus::Offline,
+            Some(EndReason::Interrupted),
+        );
         let newer = ss("l1", 20, true, SessionStatus::Working, None);
         assert_eq!(card_state(&[older, newer]), CardState::Working);
     }
@@ -388,7 +397,13 @@ mod tests {
 
     #[test]
     fn a_closed_session_is_paused_or_interrupted_by_its_stamp() {
-        let paused = ss("l", 1, false, SessionStatus::Offline, Some(EndReason::Captain));
+        let paused = ss(
+            "l",
+            1,
+            false,
+            SessionStatus::Offline,
+            Some(EndReason::Captain),
+        );
         let died = ss("l", 1, false, SessionStatus::Offline, None);
         assert_eq!(card_state(&[paused]), CardState::Paused);
         assert_eq!(card_state(&[died]), CardState::Interrupted);
