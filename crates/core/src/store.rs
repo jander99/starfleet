@@ -34,6 +34,31 @@ pub struct Card {
     pub done: bool,
     pub created_at: u64,
     pub updated_at: u64,
+    /// Durable things this card points at: a PR, a URL, a note, a pane.
+    /// They outlive the panes, which is the point.
+    #[serde(default)]
+    pub artifacts: Vec<Artifact>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ArtifactKind {
+    Pr,
+    Url,
+    Note,
+    Pane,
+}
+
+/// A durable pointer attached to a card. `last_status`/`checked_at` are the
+/// last poll's answer, kept so a stale PR state is visible as stale.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Artifact {
+    pub id: String,
+    pub kind: ArtifactKind,
+    pub label: String,
+    pub target: String,
+    pub last_status: Option<String>,
+    pub checked_at: Option<u64>,
 }
 
 /// Why a session ended, stamped by Starfleet when it closes a pane.
@@ -228,6 +253,7 @@ impl Store {
             done: false,
             created_at: now,
             updated_at: now,
+            artifacts: Vec::new(),
         };
         self.board.cards.push(card.clone());
         self.save()?;
@@ -276,6 +302,43 @@ impl Store {
 
     pub fn add_link(&mut self, link: SessionLink) -> Result<()> {
         self.board.links.push(link);
+        self.save()
+    }
+
+    /// Attach a durable artifact to a card. An unknown card is an error.
+    pub fn add_artifact(&mut self, card_id: &str, artifact: Artifact) -> Result<()> {
+        let card = self
+            .board
+            .cards
+            .iter_mut()
+            .find(|c| c.id == card_id)
+            .ok_or_else(|| anyhow!("that card no longer exists"))?;
+        card.artifacts.push(artifact);
+        self.save()
+    }
+
+    /// Record a poll's answer for an artifact. A vanished artifact is an
+    /// error, not a panic: the card may have been edited since the poll began.
+    pub fn update_artifact(
+        &mut self,
+        card_id: &str,
+        artifact_id: &str,
+        last_status: Option<&str>,
+        checked_at: Option<u64>,
+    ) -> Result<()> {
+        let card = self
+            .board
+            .cards
+            .iter_mut()
+            .find(|c| c.id == card_id)
+            .ok_or_else(|| anyhow!("that card no longer exists"))?;
+        let artifact = card
+            .artifacts
+            .iter_mut()
+            .find(|a| a.id == artifact_id)
+            .ok_or_else(|| anyhow!("that artifact no longer exists"))?;
+        artifact.last_status = last_status.map(str::to_string);
+        artifact.checked_at = checked_at;
         self.save()
     }
 
@@ -425,6 +488,40 @@ mod tests {
             assert_eq!(serde_json::from_str::<EndReason>(json).unwrap(), expected);
         }
         assert_eq!(serde_json::to_string(&EndReason::IdleTimeout).unwrap(), "\"idle_timeout\"");
+    }
+
+    #[test]
+    fn an_artifact_survives_a_reload() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("board.json");
+        let mut store = Store::load(file.clone()).unwrap();
+        let card = store.create_card("pr work", "/w", "").unwrap();
+        store
+            .add_artifact(
+                &card.id,
+                Artifact {
+                    id: "a1".into(),
+                    kind: ArtifactKind::Pr,
+                    label: "PR #25".into(),
+                    target: "https://github.com/jander99/starfleet/pull/25".into(),
+                    last_status: None,
+                    checked_at: None,
+                },
+            )
+            .unwrap();
+        store.update_artifact(&card.id, "a1", Some("ci_running"), Some(42)).unwrap();
+        let reloaded = Store::load(file).unwrap();
+        let a = &reloaded.card(&card.id).unwrap().artifacts[0];
+        assert_eq!(a.last_status.as_deref(), Some("ci_running"));
+        assert_eq!(a.checked_at, Some(42));
+    }
+
+    #[test]
+    fn updating_an_unknown_artifact_is_an_error_not_a_panic() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::load(dir.path().join("board.json")).unwrap();
+        let card = store.create_card("c", "/w", "").unwrap();
+        assert!(store.update_artifact(&card.id, "nope", Some("x"), None).is_err());
     }
 
     #[test]
