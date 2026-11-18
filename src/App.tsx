@@ -215,6 +215,9 @@ export default function App() {
                 onDispatch={(cardId) => setDispatch({ stationId: null, cardId })}
                 onNewCard={() => setCardDialog({ card: null })}
                 onEdit={(card) => setCardDialog({ card })}
+                onArtifact={(cardId, artifactId) =>
+                  backend.openArtifact(cardId, artifactId).catch((e) => setNotice(errorText(e)))
+                }
               />
             )}
             {tab === "check" && <Preflight checks={checks} running={checking} onRun={runChecks} />}

@@ -275,6 +275,43 @@ main {
 .card-state-offline {
   --c: var(--offline);
 }
+/* Artifact rows: status tone, and a muted look when the check is old. */
+.artifacts {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.artifact {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  padding: 4px 8px;
+  font: inherit;
+  font-size: 12px;
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.artifact-status {
+  opacity: 0.8;
+}
+.tone-ok .artifact-status {
+  color: var(--done);
+}
+.tone-warn .artifact-status {
+  color: var(--working);
+}
+.tone-bad .artifact-status {
+  color: var(--blocked);
+}
+.tone-muted {
+  opacity: 0.6;
+}
 .dot {
   width: 8px;
   height: 8px;
