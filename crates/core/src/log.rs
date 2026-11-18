@@ -25,17 +25,23 @@ pub struct LogEntry {
     pub session_id: Option<String>,
 }
 
+/// The log file for a card id, refusing one that would escape the logs
+/// directory — the id becomes a filename, so read and write share the check.
+fn log_file_for(paths: &Paths, card_id: &str) -> Result<std::path::PathBuf> {
+    if card_id.is_empty() || card_id.contains(['/', '\\']) || card_id.contains("..") {
+        bail!("not a usable card id for a log file: {card_id:?}");
+    }
+    Ok(paths.log_file(card_id))
+}
+
 /// Append one entry to `<data_dir>/logs/<card_id>.jsonl`.
 ///
 /// A crash can leave a torn last line with no trailing newline; appending onto
 /// it would glue the two together and lose the new entry on read. So a leading
 /// `\n` is written whenever the file does not already end in one.
 pub fn append(paths: &Paths, card_id: &str, entry: &LogEntry) -> Result<()> {
-    if card_id.is_empty() || card_id.contains(['/', '\\']) || card_id.contains("..") {
-        bail!("not a usable card id for a log file: {card_id:?}");
-    }
+    let file = log_file_for(paths, card_id)?;
     std::fs::create_dir_all(paths.logs_dir())?;
-    let file = paths.log_file(card_id);
     let needs_newline = match std::fs::read(&file) {
         Ok(bytes) => bytes.last().is_some_and(|b| *b != b'\n'),
         Err(_) => false,
@@ -53,7 +59,7 @@ pub fn append(paths: &Paths, card_id: &str, entry: &LogEntry) -> Result<()> {
 /// Every entry of a card's log, oldest first. A missing file is an empty log;
 /// lines that do not parse (a torn last line after a crash) are skipped.
 pub fn read(paths: &Paths, card_id: &str) -> Result<Vec<LogEntry>> {
-    let text = match std::fs::read_to_string(paths.log_file(card_id)) {
+    let text = match std::fs::read_to_string(log_file_for(paths, card_id)?) {
         Ok(t) => t,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(e) => return Err(e.into()),
@@ -90,6 +96,14 @@ mod tests {
         // Appending after the torn line must not lose the new entry.
         append(&paths, "c1", &LogEntry { id: "4".into(), ..e.clone() }).unwrap();
         assert_eq!(read(&paths, "c1").unwrap().len(), 3);
+    }
+
+    #[test]
+    fn read_refuses_a_card_id_that_escapes_the_logs_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::at(dir.path());
+        assert!(read(&paths, "c1/../escape").is_err());
+        assert!(read(&paths, "..").is_err());
     }
 
     #[test]

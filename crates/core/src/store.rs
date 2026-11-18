@@ -447,7 +447,9 @@ impl Store {
             .iter()
             .filter(|l| l.end_reason.is_none())
             .filter(|l| l.last_status != AgentStatus::Blocked)
-            .filter(|l| l.last_seen.is_some_and(|t| t + idle_ms <= now))
+            // saturating: a wrapping add would make a far-future last_seen
+            // look long overdue and park a session that just ran.
+            .filter(|l| l.last_seen.is_some_and(|t| t.saturating_add(idle_ms) <= now))
             .map(|l| l.id.clone())
             .collect()
     }
@@ -623,6 +625,35 @@ mod tests {
         }
         // now is past old's idle deadline (0 + 3_600_000) but not fresh's (1_000_000 + 3_600_000).
         assert_eq!(store.park_candidates(4_000_000, 3_600_000), vec!["old".to_string()]);
+    }
+
+    #[test]
+    fn parking_arithmetic_does_not_overflow() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::load(dir.path().join("board.json")).unwrap();
+        store.board.links.push(SessionLink {
+            id: "far".into(),
+            last_seen: Some(u64::MAX - 5),
+            last_status: AgentStatus::Idle,
+            ..Default::default()
+        });
+        // A wrapping add would make a far-future last_seen look long overdue.
+        assert!(store.park_candidates(1_000, 10).is_empty());
+    }
+
+    #[test]
+    fn a_park_candidate_at_exactly_the_deadline_is_parked() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::load(dir.path().join("board.json")).unwrap();
+        store.board.links.push(SessionLink {
+            id: "edge".into(),
+            last_seen: Some(1_000),
+            last_status: AgentStatus::Idle,
+            ..Default::default()
+        });
+        // The documented rule is `t + idle_ms <= now`: exactly at the deadline counts.
+        assert_eq!(store.park_candidates(4_000, 3_000), vec!["edge".to_string()]);
+        assert!(store.park_candidates(3_999, 3_000).is_empty());
     }
 
     #[test]

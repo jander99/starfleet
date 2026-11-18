@@ -104,11 +104,13 @@ pub enum CardState {
 
 /// The newest session decides, except that blocked aggregates: a permission
 /// prompt on an older session is never hidden by a newer working one.
-/// Newest is max by `(created_at, id)`, so ties are order-independent.
+/// Newest is max by `(created_at, live, id)` — the id tie-break makes it
+/// order-independent, and a live session beats a closed one when two
+/// dispatches share a millisecond (or the clock stepped back).
 pub fn card_state(sessions: &[SessionState]) -> CardState {
     let Some(newest) = sessions
         .iter()
-        .max_by_key(|s| (s.created_at, s.id.clone()))
+        .max_by_key(|s| (s.created_at, s.live, s.id.clone()))
     else {
         return CardState::Empty;
     };
@@ -366,6 +368,15 @@ mod tests {
         let b = ss("b", 10, true, SessionStatus::Working, None);
         assert_eq!(card_state(&[a.clone(), b.clone()]), CardState::Working);
         assert_eq!(card_state(&[b, a]), CardState::Working); // order-independent
+    }
+
+    #[test]
+    fn a_live_session_wins_a_created_at_tie() {
+        // Same millisecond dispatch (or a clock that stepped back): the resumed,
+        // live session must not be hidden by the older closed one, whatever ids sort.
+        let closed = ss("z", 10, false, SessionStatus::Offline, None);
+        let resumed = ss("a", 10, true, SessionStatus::Working, None);
+        assert_eq!(card_state(&[closed, resumed]), CardState::Working);
     }
 
     #[test]
