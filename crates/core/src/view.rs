@@ -110,7 +110,7 @@ pub enum CardState {
 pub fn card_state(sessions: &[SessionState]) -> CardState {
     let Some(newest) = sessions
         .iter()
-        .max_by_key(|s| (s.created_at, s.live, s.id.clone()))
+        .max_by_key(|s| (s.created_at, s.live, s.id.as_str()))
     else {
         return CardState::Empty;
     };

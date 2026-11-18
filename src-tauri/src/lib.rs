@@ -184,7 +184,7 @@ fn append_log(
     let core = core.get()?;
     let at = starfleet_core::store::now_ms();
     let entry = LogEntry {
-        id: format!("{at}-{}", text.len()),
+        id: starfleet_core::store::short_id(),
         owner: "captain".into(),
         at,
         kind: kind.unwrap_or_else(|| "note".into()),
