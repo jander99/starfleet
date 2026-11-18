@@ -479,6 +479,11 @@ impl Starfleet {
             last_seen: Some(now_ms()),
             output: None,
             output_at: None,
+            resumed_from: None,
+            cwd: None,
+            end_reason: None,
+            ended_at: None,
+            cause_hint: None,
         };
         let result = DispatchResult {
             link_id: link.id.clone(),

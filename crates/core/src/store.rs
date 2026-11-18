@@ -36,6 +36,31 @@ pub struct Card {
     pub updated_at: u64,
 }
 
+/// Why a session ended, stamped by Starfleet when it closes a pane.
+/// No stamp means the pane vanished without us: interrupted.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EndReason {
+    Captain,
+    IdleTimeout,
+    Interrupted,
+    #[default]
+    #[serde(other)]
+    Unknown,
+}
+
+/// A heuristic guess at why an agent stopped, from its output tail. Inert
+/// data: shown as "probably", never used to drive behavior.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CauseHint {
+    RateLimit,
+    UsageWindow,
+    Outage,
+    #[serde(other)]
+    Unknown,
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SessionLink {
@@ -63,6 +88,17 @@ pub struct SessionLink {
     pub output: Option<String>,
     /// When `output` was last read (or found empty).
     pub output_at: Option<u64>,
+    /// The session this one resumed, if any. History only: the newest link
+    /// (by `created_at`) decides a card's state, not the chain.
+    pub resumed_from: Option<String>,
+    /// The directory this session was aimed at, which may differ from the
+    /// live pane's cwd when a card spans a meta directory.
+    pub cwd: Option<String>,
+    /// Why the session ended; `None` while it runs, or when it died unstamped.
+    pub end_reason: Option<EndReason>,
+    pub ended_at: Option<u64>,
+    /// Optional, heuristic; see [`CauseHint`].
+    pub cause_hint: Option<CauseHint>,
 }
 
 /// The most saved output kept per session, in bytes. The end is kept.
@@ -344,6 +380,51 @@ mod tests {
             agent: Some("claude".into()),
             ..PaneInfo::default()
         }
+    }
+
+    #[test]
+    fn a_board_written_before_the_lifecycle_fields_still_loads() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("board.json");
+        std::fs::write(
+            &file,
+            r#"{"cards":[{"id":"c1","title":"t","cwd":"/w","notes":"","done":false,"created_at":1,"updated_at":1}],
+                "links":[{"id":"l1","card_id":"c1","created_at":2}]}"#,
+        )
+        .unwrap();
+        let store = Store::load(file).unwrap();
+        let link = &store.board.links[0];
+        assert_eq!(link.resumed_from, None);
+        assert_eq!(link.cwd, None);
+        assert_eq!(link.end_reason, None);
+        assert_eq!(link.ended_at, None);
+        assert_eq!(link.cause_hint, None);
+    }
+
+    #[test]
+    fn a_cause_hint_round_trips_and_an_unknown_value_falls_back() {
+        assert_eq!(
+            serde_json::from_str::<CauseHint>("\"usage_window\"").unwrap(),
+            CauseHint::UsageWindow
+        );
+        // Deserialized into the field, an unseen variant does not fail the board load.
+        let link: SessionLink =
+            serde_json::from_str(r#"{"id":"l1","cause_hint":"provider_outage"}"#).unwrap();
+        assert_eq!(link.cause_hint, Some(CauseHint::Unknown));
+    }
+
+    #[test]
+    fn an_end_reason_round_trips_and_unknown_values_fall_back() {
+        let cases = [
+            ("\"captain\"", EndReason::Captain),
+            ("\"idle_timeout\"", EndReason::IdleTimeout),
+            ("\"interrupted\"", EndReason::Interrupted),
+            ("\"provider_outage\"", EndReason::Unknown),
+        ];
+        for (json, expected) in cases {
+            assert_eq!(serde_json::from_str::<EndReason>(json).unwrap(), expected);
+        }
+        assert_eq!(serde_json::to_string(&EndReason::IdleTimeout).unwrap(), "\"idle_timeout\"");
     }
 
     #[test]
