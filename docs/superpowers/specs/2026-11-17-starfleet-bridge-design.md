@@ -58,7 +58,7 @@ Card      { id, title, cwd, notes, done, artifacts[], captain_log[] }
 Agent     { id, name, persona, rank, department, default_harness }
 Station   { id, location_id, post, name, duty, harness, model, args, prompt }
 Session   { id, card_id, agent_id, station_id, cwd, pane_id?, terminal_id?,
-            agent_session? {source, agent, kind, value},
+            agent_session? {source, agent, kind, value}, resumed_from?,
             prompt, pending_prompt?, last_status, last_seen, output?, output_at? }
 LogEntry  { id, owner, at, kind, text, links[], session_id? }
 Artifact  { kind, label, target, last_status?, checked_at? }
@@ -80,7 +80,7 @@ Artifact  { kind, label, target, last_status?, checked_at? }
 One dataset, three groupings: **project** (directory), **agent** (identity),
 **session** (one running thing). A card belongs to one project and holds one
 or more sessions; whether a resumed session continues a card or opens a new
-one is still open (§10). The board groups by project; the Lounge filters by
+one is decided as A (§11). The board groups by project; the Lounge filters by
 agent; the bridge shows one project. The UX can
 be deferred precisely because the model does not change per view.
 
@@ -192,7 +192,7 @@ Caveats:
   (**seen**: comment in `SessionDrawer.tsx`). A real embed means a client in a
   pty speaking Herdr's protocol, with input, resize and escape handling.
   Hand-off to the Herdr window is the MVP; when we do embed, it is xterm.js
-  over Herdr attach (§10) — that decision is about *which approach*, not about
+  over Herdr attach (§11) — that decision is about *which approach*, not about
   bringing it into the first slice.
 - **Webviews are cheap but need auth.** A URL and a window is easy; cookies and
   SSO are the hard part, which the browser hand-off avoids for free.
@@ -220,14 +220,22 @@ Attention is the scarce resource, so the UI is shaped by it:
 - **Idle timeout is a pane policy, not a resumability gate.** Decided: after
   60 minutes idle, park the pane (close it) and keep the session resumable
   from `agent_session`. Warn before parking if the card is mid-task.
-- **Parking never applies to a blocked session.** An agent waiting on a
-  permission question or a prompt is idle by timestamps, but its pane is the
-  one thing that needs an answer. Exempt `blocked` — nudge instead.
+- **Parking never applies to a blocked session.** `blocked` is Herdr's own
+  reported agent status on the pane (`PaneInfo.agent_status`, already stored as
+  `SessionLink.last_status`: blocked / working / idle) — an agent waiting on a
+  permission question or a prompt is idle by timestamp but its pane is the one
+  thing that needs an answer. Exempt it and nudge instead. "Mid-task" means
+  `last_status == working` at the moment the timer fires, or a pending
+  (unaccepted) artifact change.
 - **Reopen is core's job, triggered by the Captain** (decided): parking
-  closes the pane; resuming means a new pane running `claude --resume <id>`.
-  The card shows an acceptance-style warning button ("this session was parked
-  — reopen to continue"), and clicking it is the trigger. The Herdr call is
-  the normal dispatch path with the saved session id attached.
+  closes the pane; resuming means a new pane running the harness's own resume
+  command — `claude --resume <id>` for claude, `opencode --session <id>` for
+  opencode (flag to verify against the installed version). The card shows an
+  acceptance-style warning button ("this session was parked — reopen to
+  continue"), and clicking it is the trigger. **If `agent_session` was never
+  reported, the button is disabled** with an explanation: there is no id to
+  resume, only a saved output tail. The Herdr call is the normal dispatch
+  path with the saved session id attached.
 - **Second heuristic** (needs a decision): cache expiry is not observable —
   neither Herdr nor the harness reports it. If we want it, it can only be
   defined as "idle longer than X *and* other sessions are spawning or working
@@ -237,6 +245,10 @@ Attention is the scarce resource, so the UI is shaped by it:
   green must survive its pane closing: core polls `gh` on an interval, writes
   `last_status`/`checked_at` onto the artifact, and wakes the Captain's view
   when the state changes.
+- **Polls are keyed by PR, not by card.** Two cards watching the same PR
+  (e.g. a follow-up card and the original) share one poller entry; the
+  scheduler keeps one timer per distinct PR URL, and a global cap on
+  concurrent `gh` calls protects the rate limit.
 
 ## 9. MVP vs deferred
 
@@ -247,6 +259,8 @@ Attention is the scarce resource, so the UI is shaped by it:
   `Project` type in core yet; cards carry a `cwd`), plus a per-session `cwd`
   so a card over a meta directory can aim a session at a subrepo.
 - Session console grown: streamed output and follow-up replies.
+- `Session.resumed_from` lands in slice one as an optional field (cheap now,
+  required by option A); the resume *flow* itself is slice two.
 - Captain's log per card — append-only, local.
 - One artifact kind live end-to-end: `pr` with status via `gh`, open in browser;
   `herdr_pane` open via focus.
@@ -254,6 +268,11 @@ Attention is the scarce resource, so the UI is shaped by it:
 
 **Slice two** (still near-term, but not the first cut): personal logs per
 agent, idle parking with resume, `claude --resume` reopen.
+
+**Platform caveat.** PR status needs `GITHUB_TOKEN` (or `gh` auth). Linux,
+macOS and WSL are the tested path; on Windows the credential story is
+unresolved (§12), so on Windows the MVP's PR artifact shows "needs gh auth"
+until that is settled — everything else works.
 
 **How the MVP is proven.** Unit tests for the store and logs; `crates/mock-herdr`
 for dispatch, focus, parking and the PR artifact's status transitions; an
@@ -271,7 +290,7 @@ responses, never the network in CI.
 - The swarm as a control plane (**recommended against** for now).
 - A decision model that routes the Captain's prompt to a department head.
 
-## 10. Storage and credentials
+## 10. Storage
 
 **Paths already exist and should be reused** (**seen**: `crates/core/src/paths.rs`).
 `Paths::resolve` already does XDG on Linux/macOS (`$XDG_CONFIG_HOME` →
@@ -291,12 +310,11 @@ Decided (**Captain, 2026-11-17**):
   `serde_json` rejects comments, so the reader strips `//` and `/* */` before
   parsing (a small pre-pass), keeping the file human-edit-friendly.
 
-Open:
+**JSONC is a separate feature from storage.** The Captain wants comments in
+`settings.json`; a naive strip of `//` and `/* */` breaks on `//` inside
+strings (URLs). Use a real JSONC parser — `jsonc-parser` (dprint, MIT, 0.34.0,
+`serde` feature) — rather than a hand-written pre-pass.
 
-- **`GITHUB_TOKEN` comes from the environment.** A preflight check should
-  report it on Linux, macOS and WSL. On Windows the story is unclear — `gh`
-  keeps its own `hosts.yml` and Git Credential Manager stores credentials —
-  so Windows is an open item; Linux testing resumes first.
 - **Multi-machine**: the design assumes one machine. Herdr 0.9.5 can attach
   remotely (`--remote <ssh-target>`), but running Starfleet against a remote
   Herdr is a separate project.
@@ -345,9 +363,18 @@ the trap: mutating the row silently discards the chain to the old transcript.
 What A needs in the model: `Session.resumed_from?`, log entries carry
 `session_id`, and the card console collapses old rounds by default.
 
-## 12. What this document does not authorize
+## 12. Credentials
+
+- **`GITHUB_TOKEN` comes from the environment** (decided). A preflight check
+  reports whether it is set, on Linux, macOS and WSL.
+- **Windows is open**: `gh` keeps its own `hosts.yml` and Windows stores
+  credentials through Git Credential Manager. Until that is figured out, PR
+  status is unavailable there; Linux testing resumes first.
+- The token is never written into the board file or the logs.
+
+## 13. What this document does not authorize
 
 No implementation. It records a design direction, the evidence behind the
 bridge-over-swarm recommendation, and the decisions made so far. Still open:
-the Windows `gh` credential story, and the card-identity choice (A) is
+the Windows `gh` credential story. Card identity is decided (A) and
 revisit-able if it does not fit in practice.
