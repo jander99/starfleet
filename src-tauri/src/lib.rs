@@ -173,6 +173,29 @@ fn read_log(core: State<Core>, card_id: String, limit: Option<usize>) -> CmdResu
     Ok(entries)
 }
 
+#[tauri::command]
+fn append_log(
+    core: State<Core>,
+    card_id: String,
+    text: String,
+    kind: Option<String>,
+    session_id: Option<String>,
+) -> CmdResult<LogEntry> {
+    let core = core.get()?;
+    let at = starfleet_core::store::now_ms();
+    let entry = LogEntry {
+        id: format!("{at}-{}", text.len()),
+        owner: "captain".into(),
+        at,
+        kind: kind.unwrap_or_else(|| "note".into()),
+        text,
+        links: Vec::new(),
+        session_id,
+    };
+    log::append(core.paths(), &card_id, &entry).map_err(self::text)?;
+    Ok(entry)
+}
+
 fn start_core() -> Result<Arc<Starfleet>, String> {
     let paths = Paths::resolve().map_err(text)?;
     Starfleet::new(Options {
@@ -220,7 +243,8 @@ pub fn run() {
             poll_prs,
             add_artifact,
             open_artifact,
-            read_log
+            read_log,
+            append_log
         ])
         .run(tauri::generate_context!())
         .expect("failed to start the Starfleet window");
