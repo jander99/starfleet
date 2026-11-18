@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { backend, errorText, isDemo, type BoardView, type Card, type Check, type Roster, type Status } from "./api";
 import { Board } from "./components/Board";
+import { CardConsole } from "./components/CardConsole";
 import { CardDialog, DispatchDialog } from "./components/Dialogs";
 import { Backdrop } from "./components/Backdrop";
 import { LocationView, SectorMap } from "./components/MapView";
@@ -103,6 +104,7 @@ export default function App() {
   const [drawer, setDrawer] = useState<Drawer>(null);
   const [dispatch, setDispatch] = useState<{ stationId: string | null; cardId: string | null } | null>(null);
   const [cardDialog, setCardDialog] = useState<{ card: Card | null } | null>(null);
+  const [consoleCard, setConsoleCard] = useState<Card | null>(null);
   const [checks, setChecks] = useState<Check[] | null>(null);
   const [checking, setChecking] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -218,6 +220,7 @@ export default function App() {
                 onArtifact={(cardId, artifactId) =>
                   backend.openArtifact(cardId, artifactId).catch((e) => setNotice(errorText(e)))
                 }
+                onConsole={setConsoleCard}
               />
             )}
             {tab === "check" && <Preflight checks={checks} running={checking} onRun={runChecks} />}
@@ -241,6 +244,11 @@ export default function App() {
           />
         )}
         {cardDialog && <CardDialog card={cardDialog.card} onClose={() => setCardDialog(null)} />}
+        {consoleCard && (
+          <div className="console-scrim" onMouseDown={(e) => e.target === e.currentTarget && setConsoleCard(null)}>
+            <CardConsole key={consoleCard.id} card={consoleCard} onClose={() => setConsoleCard(null)} />
+          </div>
+        )}
       </div>
     </>
   );

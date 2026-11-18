@@ -29,6 +29,7 @@ function CardPanel(props: {
   onDispatch: (cardId: string) => void;
   onEdit: (card: Card) => void;
   onArtifact: (cardId: string, artifactId: string) => void;
+  onConsole: (card: Card) => void;
 }) {
   const { card } = props;
   const [error, setError] = useState<string | null>(null);
@@ -37,7 +38,9 @@ function CardPanel(props: {
     <article className={`card${card.done ? " is-done" : ""}`}>
       <header>
         <div className="card-title">
-          <h3>{card.title}</h3>
+          <button className="ghost card-name" onClick={() => props.onConsole(card)}>
+            <h3>{card.title}</h3>
+          </button>
           <CardStatePill state={card.state} />
           <code className="ellipsis" title={card.cwd}>
             {card.cwd}
@@ -130,6 +133,7 @@ export function Board(props: {
   onNewCard: () => void;
   onEdit: (card: Card) => void;
   onArtifact: (cardId: string, artifactId: string) => void;
+  onConsole: (card: Card) => void;
 }) {
   const open = attentionSorted(props.view.cards.filter((c) => !c.done));
   const done = props.view.cards.filter((c) => c.done);
@@ -146,7 +150,7 @@ export function Board(props: {
         )}
         <div className="cards">
           {open.map((c) => (
-            <CardPanel key={c.id} card={c} onSession={props.onSession} onDispatch={props.onDispatch} onEdit={props.onEdit} onArtifact={props.onArtifact} />
+            <CardPanel key={c.id} card={c} onSession={props.onSession} onDispatch={props.onDispatch} onEdit={props.onEdit} onArtifact={props.onArtifact} onConsole={props.onConsole} />
           ))}
         </div>
         {done.length > 0 && (
@@ -157,7 +161,7 @@ export function Board(props: {
             {showDone && (
               <div className="cards">
                 {done.map((c) => (
-                  <CardPanel key={c.id} card={c} onSession={props.onSession} onDispatch={props.onDispatch} onEdit={props.onEdit} onArtifact={props.onArtifact} />
+                  <CardPanel key={c.id} card={c} onSession={props.onSession} onDispatch={props.onDispatch} onEdit={props.onEdit} onArtifact={props.onArtifact} onConsole={props.onConsole} />
                 ))}
               </div>
             )}
