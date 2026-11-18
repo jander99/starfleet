@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { attentionSorted } from "../attention";
 import { backend, errorText, type BoardView, type Card, type Contact, type Session } from "../api";
 import { ErrorNote, StatusPill, timeAgo } from "../ui";
 
@@ -111,7 +112,7 @@ export function Board(props: {
   onNewCard: () => void;
   onEdit: (card: Card) => void;
 }) {
-  const open = props.view.cards.filter((c) => !c.done);
+  const open = attentionSorted(props.view.cards.filter((c) => !c.done));
   const done = props.view.cards.filter((c) => c.done);
   const [showDone, setShowDone] = useState(false);
   return (
