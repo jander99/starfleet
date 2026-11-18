@@ -4,7 +4,7 @@ use mock_herdr::MockHerdr;
 use starfleet_core::env::HostEnv;
 use starfleet_core::herdr::Endpoint;
 use starfleet_core::paths::Paths;
-use starfleet_core::view::{BoardView, SessionStatus};
+use starfleet_core::view::{BoardView, CardState, SessionStatus};
 use starfleet_core::{DispatchRequest, Options, Starfleet};
 use std::sync::Arc;
 use std::time::Duration;
@@ -274,6 +274,38 @@ async fn closed_sessions_go_offline_and_the_board_survives_a_restart() {
     let view = until(&again, "reloaded", |v| v.connected && v.cards.len() == 1).await;
     assert_eq!(view.cards[0].card.title, "Persist");
     assert_eq!(view.cards[0].sessions[0].prompt.as_deref(), Some("review"));
+}
+
+/// A pane that vanishes with no stamp from Starfleet must read as
+/// `interrupted` (the agent died), never `paused` (we closed it): offering a
+/// resume for a pause that never happened is the wrong story.
+#[tokio::test]
+async fn a_session_whose_pane_vanishes_reads_as_interrupted() {
+    let rig = rig().await;
+    let app = rig.app();
+    let card = app
+        .create_card("Vanishes", &rig.workdir("repo"), "")
+        .await
+        .unwrap();
+    let result = app
+        .dispatch(request(&card, "enterprise.data", "analyse"))
+        .await
+        .unwrap();
+    until(&app, "live", |v| {
+        v.cards
+            .first()
+            .and_then(|c| c.sessions.first())
+            .is_some_and(|s| s.live)
+    })
+    .await;
+
+    rig.mock.close_pane(&result.pane_id);
+    let view = until(&app, "offline", |v| v.counts.offline == 1).await;
+    let card_view = view.cards.iter().find(|c| c.card.id == card).unwrap();
+    // Nobody stamped an end: no end_reason, hence interrupted, not paused.
+    assert!(card_view.sessions[0].end_reason.is_none());
+    assert_eq!(card_view.state, CardState::Interrupted);
+    assert_ne!(card_view.state, CardState::Paused);
 }
 
 #[tokio::test]
