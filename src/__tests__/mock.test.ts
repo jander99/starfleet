@@ -72,3 +72,26 @@ describe("mirrored core contract", () => {
     expect(st.agent).toBeUndefined();
   });
 });
+
+describe("stage-2 artifact and log commands", () => {
+  it("exposes the artifact and log commands on the backend contract", async () => {
+    const b = createMockBackend();
+    const v = await b.view();
+    const card = v.cards[0];
+    const id = await b.addArtifact(card.id, "pr", "PR #1", "https://github.com/o/r/pull/1");
+    expect((await b.view()).cards.find((c) => c.id === card.id)!.artifacts.some((a) => a.id === id)).toBe(true);
+
+    const e = await b.appendLog(card.id, "waiting on CI", { kind: "decision", sessionId: "l1" });
+    expect(e.owner).toBe("captain");
+    expect(e.kind).toBe("decision");
+    expect(e.session_id).toBe("l1");
+
+    const all = await b.readLog(card.id);
+    expect(all.map((x) => x.id)).toContain(e.id);
+    expect((await b.readLog(card.id, 1)).length).toBe(1);
+
+    await expect(b.openArtifact(card.id, id)).resolves.toBeUndefined();
+    await expect(b.openArtifact(card.id, "nope")).rejects.toBeDefined();
+    await expect(b.appendLog("c1/../escape", "x")).rejects.toBeDefined();
+  });
+});

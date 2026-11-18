@@ -896,11 +896,24 @@ mod tests {
     #[test]
     fn artifact_commands_are_exposed_and_named_as_the_ui_expects() {
         let sfll = include_str!("../../../src-tauri/src/lib.rs");
-        for cmd in ["poll_prs", "add_artifact", "open_artifact", "read_log"] {
+        for cmd in [
+            "poll_prs",
+            "add_artifact",
+            "open_artifact",
+            "read_log",
+            "append_log",
+        ] {
             assert!(sfll.contains(cmd), "missing tauri command {cmd}");
         }
         // The UI calls camelCase argument names; tauri maps them to snake_case.
-        for arg in ["card_id", "artifact_id", "kind", "target", "label"] {
+        for arg in [
+            "card_id",
+            "artifact_id",
+            "kind",
+            "target",
+            "label",
+            "session_id",
+        ] {
             assert!(sfll.contains(arg), "missing argument {arg}");
         }
     }

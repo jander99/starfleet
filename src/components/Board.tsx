@@ -1,6 +1,8 @@
 import { useState } from "react";
+import { artifactStatus } from "../artifacts";
+import { attentionSorted } from "../attention";
 import { backend, errorText, type BoardView, type Card, type Contact, type Session } from "../api";
-import { ErrorNote, StatusPill, timeAgo } from "../ui";
+import { CardStatePill, ErrorNote, StatusPill, timeAgo } from "../ui";
 
 function SessionRow({ session, onOpen }: { session: Session; onOpen: () => void }) {
   return (
@@ -26,6 +28,8 @@ function CardPanel(props: {
   onSession: (linkId: string) => void;
   onDispatch: (cardId: string) => void;
   onEdit: (card: Card) => void;
+  onArtifact: (cardId: string, artifactId: string) => void;
+  onConsole: (card: Card) => void;
 }) {
   const { card } = props;
   const [error, setError] = useState<string | null>(null);
@@ -34,7 +38,10 @@ function CardPanel(props: {
     <article className={`card${card.done ? " is-done" : ""}`}>
       <header>
         <div className="card-title">
-          <h3>{card.title}</h3>
+          <button className="ghost card-name" onClick={() => props.onConsole(card)}>
+            <h3>{card.title}</h3>
+          </button>
+          <CardStatePill state={card.state} />
           <code className="ellipsis" title={card.cwd}>
             {card.cwd}
           </code>
@@ -49,6 +56,21 @@ function CardPanel(props: {
         </div>
       </header>
       {card.notes && <p className="notes">{card.notes}</p>}
+      {card.artifacts.length > 0 && (
+        <ul className="artifacts">
+          {card.artifacts.map((a) => {
+            const st = artifactStatus(a);
+            return (
+              <li key={a.id}>
+                <button className={`artifact tone-${st.tone}`} onClick={() => props.onArtifact(card.id, a.id)} title={a.target}>
+                  <span className="artifact-label">{a.label}</span>
+                  <span className="artifact-status">{st.text}</span>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
       {card.sessions.length > 0 ? (
         <ul className="sessions">
           {card.sessions.map((s) => (
@@ -110,8 +132,10 @@ export function Board(props: {
   onDispatch: (cardId: string) => void;
   onNewCard: () => void;
   onEdit: (card: Card) => void;
+  onArtifact: (cardId: string, artifactId: string) => void;
+  onConsole: (card: Card) => void;
 }) {
-  const open = props.view.cards.filter((c) => !c.done);
+  const open = attentionSorted(props.view.cards.filter((c) => !c.done));
   const done = props.view.cards.filter((c) => c.done);
   const [showDone, setShowDone] = useState(false);
   return (
@@ -126,7 +150,7 @@ export function Board(props: {
         )}
         <div className="cards">
           {open.map((c) => (
-            <CardPanel key={c.id} card={c} onSession={props.onSession} onDispatch={props.onDispatch} onEdit={props.onEdit} />
+            <CardPanel key={c.id} card={c} onSession={props.onSession} onDispatch={props.onDispatch} onEdit={props.onEdit} onArtifact={props.onArtifact} onConsole={props.onConsole} />
           ))}
         </div>
         {done.length > 0 && (
@@ -137,7 +161,7 @@ export function Board(props: {
             {showDone && (
               <div className="cards">
                 {done.map((c) => (
-                  <CardPanel key={c.id} card={c} onSession={props.onSession} onDispatch={props.onDispatch} onEdit={props.onEdit} />
+                  <CardPanel key={c.id} card={c} onSession={props.onSession} onDispatch={props.onDispatch} onEdit={props.onEdit} onArtifact={props.onArtifact} onConsole={props.onConsole} />
                 ))}
               </div>
             )}

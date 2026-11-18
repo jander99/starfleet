@@ -254,6 +254,136 @@ main {
 .status-offline {
   --c: var(--offline);
 }
+/* Card state: coarser than a session status, same palette. */
+.card-state-blocked,
+.card-state-interrupted {
+  --c: var(--blocked);
+}
+.card-state-paused {
+  --c: var(--offline);
+}
+.card-state-working {
+  --c: var(--working);
+}
+.card-state-idle,
+.card-state-empty {
+  --c: var(--idle);
+}
+.card-state-done {
+  --c: var(--done);
+}
+.card-state-offline {
+  --c: var(--offline);
+}
+/* Artifact rows: status tone, and a muted look when the check is old. */
+.artifacts {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.artifact {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  padding: 4px 8px;
+  font: inherit;
+  font-size: 12px;
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.artifact-status {
+  opacity: 0.8;
+}
+.tone-ok .artifact-status {
+  color: var(--done);
+}
+.tone-warn .artifact-status {
+  color: var(--working);
+}
+.tone-bad .artifact-status {
+  color: var(--blocked);
+}
+.tone-muted {
+  opacity: 0.6;
+}
+/* The card console: a side sheet with the Captain's Log timeline. */
+.console-scrim {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  display: flex;
+  justify-content: flex-end;
+  z-index: 20;
+}
+.console {
+  width: min(460px, 100%);
+  height: 100%;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 18px;
+  background: var(--panel, #12161f);
+  border-left: 1px solid var(--line);
+}
+.console header {
+  display: flex;
+  justify-content: space-between;
+  align-items: start;
+  gap: 8px;
+}
+.console header h2 {
+  margin: 0;
+  font-size: 16px;
+}
+.log-round {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-left: 2px solid var(--line);
+  padding-left: 12px;
+}
+.log-head {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+}
+.log-text {
+  margin: 2px 0 0;
+  white-space: pre-wrap;
+}
+.kind-decision .log-text {
+  color: var(--done);
+}
+.log-write {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.log-write textarea {
+  min-height: 70px;
+  resize: vertical;
+  font: inherit;
+  padding: 8px;
+  background: transparent;
+  color: inherit;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+.card-name {
+  padding: 0;
+  text-align: left;
+}
 .dot {
   width: 8px;
   height: 8px;
