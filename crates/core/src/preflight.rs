@@ -335,8 +335,11 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn the_token_probe_reads_the_environment() {
+        // A prefix assignment is not expanded on the same command line, so
+        // export first — otherwise the probe only passes when the outer
+        // environment happens to have GITHUB_TOKEN set.
         let out = HostEnv::Native
-            .sh("GITHUB_TOKEN=abc [ -n \"$GITHUB_TOKEN\" ] && echo set || echo unset")
+            .sh("GITHUB_TOKEN=abc; export GITHUB_TOKEN; [ -n \"$GITHUB_TOKEN\" ] && echo set || echo unset")
             .await
             .unwrap();
         assert_eq!(out.stdout, "set");
