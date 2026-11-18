@@ -59,7 +59,9 @@ Agent     { id, name, persona, rank, department, default_harness }
 Station   { id, location_id, post, name, duty, harness, model, args, prompt }
 Session   { id, card_id, agent_id, station_id, cwd, pane_id?, terminal_id?,
             agent_session? {source, agent, kind, value}, resumed_from?,
-            prompt, pending_prompt?, last_status, last_seen, output?, output_at? }
+            prompt, pending_prompt?, last_status, last_seen, output?, output_at?,
+            end_reason?, ended_at?, cause_hint? }   end_reason: captain | idle_timeout
+                                                    | turn_complete | interrupted (§8.1)
 LogEntry  { id, owner, at, kind, text, links[], session_id? }
 Artifact  { kind, label, target, last_status?, checked_at? }
 ```
@@ -236,6 +238,45 @@ Attention is the scarce resource, so the UI is shaped by it:
   reported, the button is disabled** with an explanation: there is no id to
   resume, only a saved output tail. The Herdr call is the normal dispatch
   path with the saved session id attached.
+### 8.1 Paused vs interrupted
+
+**Decided (Captain, 2026-11-17):** there is **no provider fallback**. A persona
+is bound to its configured harness and model (per station, via
+`Station.model`/`args`). If the provider fails or the usage window runs out,
+the session ends; Starfleet does not continue it elsewhere. Failure is an
+allowed outcome. What the card must keep is the resume handle.
+
+Herdr cannot tell us why a session stopped: `AgentStatus` is
+`idle | working | blocked | done | unknown`, with no provider-health signal
+(**seen**: `crates/core/src/herdr/model.rs`). An outage looks like a pane that
+went idle after an error, hung at `working`, or vanished (`offline`). So the
+distinction is **who caused the stop**, and Starfleet records its own intent:
+
+| State | Cause | Evidence |
+| --- | --- | --- |
+| **Paused** | The Captain or Starfleet, on purpose | Starfleet stamped `end_reason` when it acted: `captain`, `idle_timeout`, or `turn_complete`. |
+| **Interrupted** | Anything else, unplanned | The pane stopped or vanished with no Starfleet stamp. |
+
+Rules:
+
+- **Intent present → paused; intent absent → interrupted.** Every park and
+  reopen is Starfleet's own action, so it stamps `end_reason` and `ended_at`
+  at that moment.
+- **Idle parking (above) applies only to live sessions.** A session that dies
+  on its own was not parked, so it is never stamped `idle_timeout`.
+- **Record `agent_session` the moment Herdr first reports it**, not only on
+  park. An abrupt death must still leave an id to run `claude --resume <id>`
+  once the window reopens. The log entry for the session start carries it.
+- **Interrupted cards sort into the `stale` tier (§7).** The Captain decides:
+  resume when capacity returns, or abandon. Neither is automatic.
+- **`cause_hint?` is optional and heuristic**: a scan of the saved output tail
+  for rate-limit or usage-limit text may label `rate_limit`, `usage_window` or
+  `outage`. It is shown as "probably", is never used to drive behavior, and is
+  a guess like the cache-expiry heuristic below.
+- **False interrupted**: a pane the Captain closes by hand in Herdr, outside
+  Starfleet, carries no stamp and reads as interrupted. The card offers a
+  one-click "I closed this" that relabels it `captain`.
+
 - **Second heuristic** (needs a decision): cache expiry is not observable —
   neither Herdr nor the harness reports it. If we want it, it can only be
   defined as "idle longer than X *and* other sessions are spawning or working
@@ -285,6 +326,9 @@ responses, never the network in CI.
 - Embedded terminal frames (Ghostty/xterm over Herdr attach).
 - Webviews for PR, Confluence, Claude artifacts.
 - Cross-agent mediated messaging (the relay), the helper loop, budgets.
+  **Cross-harness communication is an explicit MVP non-goal** (Captain,
+  2026-11-17): Claude and opencode stations coexist as independent crews that
+  do not message each other, and there is no provider fallback (§8.1).
 - Isolated worktrees for concurrent writers on one repo.
 - Observation Lounge as its own view (a filter first).
 - The swarm as a control plane (**recommended against** for now).
