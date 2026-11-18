@@ -126,6 +126,29 @@ pub struct SessionLink {
     pub cause_hint: Option<CauseHint>,
 }
 
+/// Walk a resume chain from `start`, newest first, as ids.
+///
+/// History only — card state comes from the newest link by `created_at`, not
+/// from this walk — but the walk is still guarded: it stops at an unknown id,
+/// at an id seen before (a cycle), or after 1000 entries.
+pub fn resume_chain(links: &[SessionLink], start: &str) -> Vec<String> {
+    let by_id: std::collections::HashMap<&str, &SessionLink> =
+        links.iter().map(|l| (l.id.as_str(), l)).collect();
+    let mut visited = std::collections::HashSet::new();
+    let mut chain = Vec::new();
+    let mut current = start;
+    while chain.len() < 1000 {
+        let Some(link) = by_id.get(current) else { break };
+        if !visited.insert(link.id.clone()) {
+            break;
+        }
+        chain.push(link.id.clone());
+        let Some(next) = link.resumed_from.as_deref() else { break };
+        current = next;
+    }
+    chain
+}
+
 /// The most saved output kept per session, in bytes. The end is kept.
 pub const OUTPUT_MAX_BYTES: usize = 32 * 1024;
 
@@ -400,6 +423,35 @@ impl Store {
         (changed, capture)
     }
 
+    /// Record why a session ended. A vanished link is an error, not a panic.
+    pub fn end_session(&mut self, link_id: &str, reason: EndReason) -> Result<()> {
+        let link = self
+            .board
+            .links
+            .iter_mut()
+            .find(|l| l.id == link_id)
+            .ok_or_else(|| anyhow!("that session no longer exists"))?;
+        link.end_reason = Some(reason);
+        link.ended_at = Some(now_ms());
+        self.save()
+    }
+
+    /// Link ids eligible for idle parking: not ended, not blocked, and last
+    /// seen at least `idle_ms` before `now`.
+    ///
+    /// This is a pure store query over link fields — it does not read a Herdr
+    /// snapshot. Liveness is checked by the caller (`app.rs`) at park time.
+    pub fn park_candidates(&self, now: u64, idle_ms: u64) -> Vec<String> {
+        self.board
+            .links
+            .iter()
+            .filter(|l| l.end_reason.is_none())
+            .filter(|l| l.last_status != AgentStatus::Blocked)
+            .filter(|l| l.last_seen.is_some_and(|t| t + idle_ms <= now))
+            .map(|l| l.id.clone())
+            .collect()
+    }
+
     /// Keep the end of a session's output on its link. Empty output leaves an
     /// earlier record in place. Returns whether the link still exists.
     pub fn record_output(&mut self, link_id: &str, text: &str) -> Result<bool> {
@@ -522,6 +574,70 @@ mod tests {
         let mut store = Store::load(dir.path().join("board.json")).unwrap();
         let card = store.create_card("c", "/w", "").unwrap();
         assert!(store.update_artifact(&card.id, "nope", Some("x"), None).is_err());
+    }
+
+    #[test]
+    fn the_resume_chain_stops_at_a_dangling_id() {
+        let links = vec![
+            SessionLink { id: "a".into(), resumed_from: None, ..Default::default() },
+            SessionLink { id: "b".into(), resumed_from: Some("a".into()), ..Default::default() },
+            SessionLink { id: "c".into(), resumed_from: Some("missing".into()), ..Default::default() },
+        ];
+        assert_eq!(resume_chain(&links, "b"), vec!["b".to_string(), "a".to_string()]);
+        assert_eq!(resume_chain(&links, "c"), vec!["c".to_string()]);
+        assert_eq!(resume_chain(&links, "nope"), Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_cyclic_resume_chain_does_not_loop() {
+        let links = vec![
+            SessionLink { id: "a".into(), resumed_from: Some("b".into()), ..Default::default() },
+            SessionLink { id: "b".into(), resumed_from: Some("a".into()), ..Default::default() },
+        ];
+        let chain = resume_chain(&links, "a");
+        assert_eq!(chain.len(), 2);
+    }
+
+    #[test]
+    fn parking_skips_blocked_and_recent_sessions() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::load(dir.path().join("board.json")).unwrap();
+        for (id, seen, status) in [
+            ("old", 0u64, AgentStatus::Idle),
+            // 1_000_000: seen after now - idle_ms, so not yet parkable.
+            ("fresh", 1_000_000, AgentStatus::Idle),
+            ("waiting", 0, AgentStatus::Blocked),
+            ("closed", 0, AgentStatus::Done),
+        ] {
+            let mut link = SessionLink {
+                id: id.into(),
+                last_seen: Some(seen),
+                last_status: status,
+                ..Default::default()
+            };
+            if id == "closed" {
+                link.end_reason = Some(EndReason::Captain);
+                link.ended_at = Some(1);
+            }
+            store.board.links.push(link);
+        }
+        // now is past old's idle deadline (0 + 3_600_000) but not fresh's (1_000_000 + 3_600_000).
+        assert_eq!(store.park_candidates(4_000_000, 3_600_000), vec!["old".to_string()]);
+    }
+
+    #[test]
+    fn ending_a_session_stamps_reason_and_time_and_persists() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("board.json");
+        let mut store = Store::load(file.clone()).unwrap();
+        store.board.links.push(SessionLink { id: "l1".into(), ..Default::default() });
+        store.end_session("l1", EndReason::IdleTimeout).unwrap();
+        let reloaded = Store::load(file).unwrap();
+        let link = &reloaded.board.links[0];
+        assert_eq!(link.end_reason, Some(EndReason::IdleTimeout));
+        assert!(link.ended_at.is_some());
+        let mut again = reloaded;
+        assert!(again.end_session("missing", EndReason::Captain).is_err());
     }
 
     #[test]
