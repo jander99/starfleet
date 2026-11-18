@@ -19,7 +19,8 @@ const STATE_RANK: Record<CardState, number> = {
 /** A PR whose polled status is final: the Captain has to decide what is next. */
 const DECISION_STATUSES = ["ci_passed", "merged", "closed", "ci_failed"];
 
-const NEEDS_DECISION = 2;
+/** Between interrupted (1) and done (2): a PR verdict is waiting on the Captain. */
+const NEEDS_DECISION = 1.5;
 
 /**
  * How much a card needs attention: lower is more urgent.

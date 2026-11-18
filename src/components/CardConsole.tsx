@@ -34,7 +34,7 @@ export function CardConsole({ card, onClose }: { card: Card; onClose: () => void
 
   const load = () => backend.readLog(card.id).then(setEntries, (e) => setError(errorText(e)));
   useEffect(() => {
-    load();
+    backend.readLog(card.id).then(setEntries, (e) => setError(errorText(e)));
   }, [card.id]);
 
   const add = () => {

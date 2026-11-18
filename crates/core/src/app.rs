@@ -84,6 +84,22 @@ fn non_empty(s: Option<String>) -> Option<String> {
     s.map(|v| v.trim().to_string()).filter(|v| !v.is_empty())
 }
 
+// A poisoned lock means some command panicked while holding it. For these
+// fields the data is still consistent (each mutation is a single assignment or
+// a map operation), so recovering keeps a long-lived app usable instead of
+// failing every later command.
+fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+fn read_live<T>(m: &RwLock<T>) -> std::sync::RwLockReadGuard<'_, T> {
+    m.read().unwrap_or_else(|e| e.into_inner())
+}
+
+fn write_live<T>(m: &RwLock<T>) -> std::sync::RwLockWriteGuard<'_, T> {
+    m.write().unwrap_or_else(|e| e.into_inner())
+}
+
 /// Herdr will not take a prompt while the agent is waiting on the user. A
 /// freshly started agent sitting at a startup dialog (such as Claude Code's
 /// folder trust prompt) is reported as `agent_not_ready`, not `agent_blocked`.
@@ -154,7 +170,7 @@ impl Starfleet {
             checked_at: None,
         };
         let id = artifact.id.clone();
-        self.store.lock().unwrap().add_artifact(card_id, artifact)?;
+        lock(&self.store).add_artifact(card_id, artifact)?;
         self.notify();
         Ok(id)
     }
@@ -169,13 +185,18 @@ impl Starfleet {
     }
 
     pub fn view(&self) -> BoardView {
-        let live = self.live.read().unwrap();
-        let store = self.store.lock().unwrap();
+        // Copy out of each lock before taking the next: a guard held across a
+        // second lock makes the ordering an invariant by discipline only.
+        let (snapshot, error) = {
+            let live = read_live(&self.live);
+            (live.snapshot.clone(), live.error.clone())
+        };
+        let store = lock(&self.store);
         view::build(
             &store.board,
-            live.snapshot.as_ref(),
+            snapshot.as_ref(),
             &self.roster,
-            live.error.clone(),
+            error,
             self.client.endpoint().describe(),
         )
     }
@@ -190,10 +211,10 @@ impl Starfleet {
     /// (shared across cards), paced by [`PR_INTERVAL_MS`] and backoff.
     /// Returns how many `gh` calls it made.
     pub async fn poll_prs_once(&self, at_ms: u64) -> usize {
-        let prs = self.store.lock().unwrap().pr_artifacts();
+        let prs = lock(&self.store).pr_artifacts();
         let urls: Vec<String> = prs.iter().map(|p| p.target.clone()).collect();
-        self.pr.lock().unwrap().retain(&urls);
-        let due = self.pr.lock().unwrap().due(&urls, at_ms);
+        lock(&self.pr).retain(&urls);
+        let due = lock(&self.pr).due(&urls, at_ms);
         // Polled one at a time on purpose: the loop is the concurrency bound,
         // and PrPoller's cap only bounds how many are handed out per batch.
         let mut calls = 0;
@@ -202,7 +223,7 @@ impl Starfleet {
             let outcome = match crate::pr::poll_pr(&self.env, self.gh.as_deref(), url).await {
                 Ok(status) => {
                     let status_str = status.as_str();
-                    let mut store = self.store.lock().unwrap();
+                    let mut store = lock(&self.store);
                     for p in prs.iter().filter(|p| &p.target == url) {
                         if store
                             .update_artifact(
@@ -220,7 +241,7 @@ impl Starfleet {
                 }
                 Err(_) => PollOutcome::Failed,
             };
-            self.pr.lock().unwrap().record(url, outcome, at_ms);
+            lock(&self.pr).record(url, outcome, at_ms);
         }
         calls
     }
@@ -239,9 +260,9 @@ impl Starfleet {
             });
         match result {
             Ok(snapshot) => {
-                let (_, capture) = self.store.lock().unwrap().reconcile(&snapshot);
+                let (_, capture) = lock(&self.store).reconcile(&snapshot);
                 {
-                    let mut live = self.live.write().unwrap();
+                    let mut live = write_live(&self.live);
                     live.snapshot = Some(snapshot.clone());
                     live.error = None;
                 }
@@ -250,7 +271,7 @@ impl Starfleet {
                 Ok(snapshot)
             }
             Err(e) => {
-                let mut live = self.live.write().unwrap();
+                let mut live = write_live(&self.live);
                 live.snapshot = None;
                 live.error = Some(e.to_string());
                 drop(live);
@@ -271,14 +292,14 @@ impl Starfleet {
             let Ok(text) = self.tail(&pane_id, OUTPUT_LINES).await else {
                 continue;
             };
-            let _ = self.store.lock().unwrap().record_output(&link_id, &text);
+            let _ = lock(&self.store).record_output(&link_id, &text);
         }
         self.notify();
     }
 
     /// The output saved for a session when its agent last stopped working.
     pub fn saved_output(&self, link_id: &str) -> Result<Option<String>> {
-        let store = self.store.lock().unwrap();
+        let store = lock(&self.store);
         let link = store
             .board
             .links
@@ -338,7 +359,7 @@ impl Starfleet {
             tokio::select! {
                 event = stream.next() => {
                     if let Err(e) = event {
-                        self.live.write().unwrap().error = Some(e.to_string());
+                        write_live(&self.live).error = Some(e.to_string());
                         return Err(e);
                     }
                     due.get_or_insert(tokio::time::Instant::now() + Duration::from_millis(300));
@@ -397,7 +418,7 @@ impl Starfleet {
 
     pub async fn create_card(&self, title: &str, cwd: &str, notes: &str) -> Result<String> {
         let cwd = self.resolve_dir(cwd).await?;
-        let card = self.store.lock().unwrap().create_card(title, &cwd, notes)?;
+        let card = lock(&self.store).create_card(title, &cwd, notes)?;
         self.notify();
         Ok(card.id)
     }
@@ -423,7 +444,7 @@ impl Starfleet {
     }
 
     pub fn delete_card(&self, id: &str) -> Result<()> {
-        self.store.lock().unwrap().delete_card(id)?;
+        lock(&self.store).delete_card(id)?;
         self.notify();
         Ok(())
     }
@@ -439,14 +460,14 @@ impl Starfleet {
             .as_ref()
             .map(|s| s.panes.clone())
             .unwrap_or_default();
-        self.store.lock().unwrap().attach(card_id, &pane, &panes)?;
+        lock(&self.store).attach(card_id, &pane, &panes)?;
         self.notify();
         Ok(())
     }
 
     /// Remove a link. The Herdr session keeps running and becomes unassigned.
     pub fn detach(&self, link_id: &str) -> Result<()> {
-        self.store.lock().unwrap().remove_link(link_id)?;
+        lock(&self.store).remove_link(link_id)?;
         self.notify();
         Ok(())
     }
@@ -463,7 +484,7 @@ impl Starfleet {
             .station(&req.station_id)
             .ok_or_else(|| anyhow!("unknown station `{}`", req.station_id))?
             .clone();
-        let card = self.store.lock().unwrap().card(&req.card_id)?.clone();
+        let card = lock(&self.store).card(&req.card_id)?.clone();
         if card.cwd.is_empty() {
             bail!("this card has no working directory yet");
         }
@@ -590,7 +611,7 @@ impl Starfleet {
             pane_id: agent.pane_id.clone(),
             warning,
         };
-        self.store.lock().unwrap().add_link(link)?;
+        lock(&self.store).add_link(link)?;
         let _ = self.refresh().await;
         Ok(result)
     }
@@ -598,8 +619,8 @@ impl Starfleet {
     /// Deliver a first prompt that was held back at dispatch.
     pub async fn send_pending(&self, link_id: &str) -> Result<()> {
         let (pane_id, text) = {
-            let live = self.live.read().unwrap();
-            let store = self.store.lock().unwrap();
+            let live = read_live(&self.live);
+            let store = lock(&self.store);
             let link = store
                 .board
                 .links
@@ -618,7 +639,7 @@ impl Starfleet {
             (pane.pane_id.clone(), text)
         };
         self.follow_up(&pane_id, &text).await?;
-        let mut store = self.store.lock().unwrap();
+        let mut store = lock(&self.store);
         if let Some(link) = store.board.links.iter_mut().find(|l| l.id == link_id) {
             link.pending_prompt = None;
         }
@@ -741,7 +762,7 @@ impl Starfleet {
     /// The store guard is dropped before awaiting — a held MutexGuard across
     /// an await makes the future non-Send, which a tauri command rejects.
     pub async fn open_artifact(&self, card_id: &str, artifact_id: &str) -> Result<()> {
-        let found = self.store.lock().unwrap().card(card_id).ok().and_then(|c| {
+        let found = lock(&self.store).card(card_id).ok().and_then(|c| {
             c.artifacts
                 .iter()
                 .find(|a| a.id == artifact_id)
@@ -896,6 +917,13 @@ mod tests {
     #[test]
     fn artifact_commands_are_exposed_and_named_as_the_ui_expects() {
         let sfll = include_str!("../../../src-tauri/src/lib.rs");
+        // Only the registered handler list counts: a command mentioned in a
+        // comment or a doc string is not exposed.
+        let handlers = sfll
+            .split("generate_handler![")
+            .nth(1)
+            .and_then(|rest| rest.split(']').next())
+            .expect("the shell registers its commands");
         for cmd in [
             "poll_prs",
             "add_artifact",
@@ -903,7 +931,10 @@ mod tests {
             "read_log",
             "append_log",
         ] {
-            assert!(sfll.contains(cmd), "missing tauri command {cmd}");
+            assert!(
+                handlers.split(',').any(|h| h.trim() == cmd),
+                "missing tauri command {cmd}"
+            );
         }
         // The UI calls camelCase argument names; tauri maps them to snake_case.
         for arg in [

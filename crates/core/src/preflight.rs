@@ -1,7 +1,7 @@
 //! System check: is everything Starfleet depends on installed and running,
 //! in the environment where the agents actually live?
 
-use crate::env::HostEnv;
+use crate::env::{sh_quote, HostEnv};
 use crate::herdr::HerdrClient;
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -45,13 +45,16 @@ fn check(
 /// Locate a CLI the way a login shell would, since GUI apps do not inherit
 /// the PATH that shell profiles set up. Prints the path, then its version.
 fn find_tool_script(name: &str) -> String {
+    // The name ends up in shell text, so it is quoted once and exported: the
+    // inner login shell must see it as data, not expand it before it runs.
     format!(
-        "PATH=\"$PATH:$HOME/.local/bin:$HOME/bin:$HOME/.cargo/bin:/usr/local/bin:/opt/homebrew/bin:\
+        "SF_TOOL={}; export SF_TOOL; PATH=\"$PATH:$HOME/.local/bin:$HOME/bin:$HOME/.cargo/bin:/usr/local/bin:/opt/homebrew/bin:\
 $HOME/.bun/bin:$HOME/.npm-global/bin:$HOME/.opencode/bin:$HOME/.claude/local:\
 /home/linuxbrew/.linuxbrew/bin:$HOME/.linuxbrew/bin\"; \
-p=$(command -v {name} 2>/dev/null); \
-if [ ! -x \"$p\" ]; then p=$(bash -lic 'command -v {name}' 2>/dev/null | tail -n 1); fi; \
-[ -x \"$p\" ] || exit 1; echo \"$p\"; \"$p\" --version 2>/dev/null | head -n 1"
+p=$(command -v \"$SF_TOOL\" 2>/dev/null); \
+if [ ! -x \"$p\" ]; then p=$(bash -lic 'command -v \"$SF_TOOL\"' 2>/dev/null | tail -n 1); fi; \
+[ -x \"$p\" ] || exit 1; echo \"$p\"; \"$p\" --version 2>/dev/null | head -n 1",
+        sh_quote(name)
     )
 }
 

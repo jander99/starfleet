@@ -106,11 +106,17 @@ impl Settings {
 
 /// Write a file by writing a sibling temp file and renaming it over the target.
 pub fn write_atomic(file: &Path, contents: &str) -> Result<()> {
+    use std::io::Write;
     if let Some(dir) = file.parent() {
         std::fs::create_dir_all(dir)?;
     }
     let tmp = file.with_extension("tmp");
-    std::fs::write(&tmp, contents)?;
+    // fsync before the rename: otherwise a power loss can leave the rename
+    // durable while the written bytes are not, which is an empty board file.
+    let mut out = std::fs::File::create(&tmp)?;
+    out.write_all(contents.as_bytes())?;
+    out.sync_all()?;
+    drop(out);
     std::fs::rename(&tmp, file)?;
     Ok(())
 }

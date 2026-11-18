@@ -8,10 +8,13 @@ export type Tone = "ok" | "warn" | "bad" | "muted";
 
 const STATUS_TEXT: Record<string, string> = {
   ci_running: "CI running",
+  ci_pending: "CI pending",
   ci_passed: "CI passed",
   ci_failed: "CI failed",
   merged: "Merged",
   closed: "Closed",
+  draft: "Draft",
+  open: "Open",
   unknown: "Unknown",
 };
 
