@@ -148,6 +148,16 @@ export interface CardPatch {
   done?: boolean;
 }
 
+export interface LogEntry {
+  id: string;
+  owner: string;            // "captain" or an agent id
+  at: number;
+  kind: string;             // "note" | "decision" | "prompt" | "result" | "artifact"
+  text: string;
+  links: string[];
+  session_id: string | null;
+}
+
 export interface Backend {
   view(): Promise<BoardView>;
   roster(): Promise<Roster>;
@@ -165,6 +175,10 @@ export interface Backend {
   /** Output saved when the session's agent last stopped working. */
   savedOutput(linkId: string): Promise<string | null>;
   focus(paneId: string): Promise<void>;
+  addArtifact(cardId: string, kind: ArtifactKind, label: string, target: string): Promise<string>;
+  openArtifact(cardId: string, artifactId: string): Promise<void>;
+  readLog(cardId: string, limit?: number): Promise<LogEntry[]>;
+  appendLog(cardId: string, text: string, opts?: { kind?: string; sessionId?: string | null }): Promise<LogEntry>;
   /** Calls `cb` whenever the board view may have changed. Returns an unsubscribe. */
   onChange(cb: () => void): () => void;
 }
@@ -185,6 +199,11 @@ const tauriBackend: Backend = {
   tail: (paneId, lines) => invoke("tail", { paneId, lines }),
   savedOutput: (linkId) => invoke("saved_output", { linkId }),
   focus: (paneId) => invoke("focus", { paneId }),
+  addArtifact: (cardId, kind, label, target) => invoke("add_artifact", { cardId, kind, label, target }),
+  openArtifact: (cardId, artifactId) => invoke("open_artifact", { cardId, artifactId }),
+  readLog: (cardId, limit) => invoke("read_log", { cardId, limit }),
+  appendLog: (cardId, text, opts) =>
+    invoke("append_log", { cardId, text, kind: opts?.kind ?? null, sessionId: opts?.sessionId ?? null }),
   onChange: (cb) => {
     const pending = listen("board-changed", cb);
     return () => {

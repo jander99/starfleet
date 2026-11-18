@@ -2,7 +2,7 @@
 // Herdr. Behaviour is deliberately simple: prompts work for a few seconds and
 // then finish.
 
-import type { Backend, BoardView, Card, Check, Contact, Roster, Session, Status } from "./api";
+import type { Backend, BoardView, Card, Check, Contact, LogEntry, Roster, Session, Status } from "./api";
 
 const station = (id: string, name: string, post: string, duty: string) => ({
   id,
@@ -71,6 +71,8 @@ export function createMockBackend(): Backend {
   const transcripts = new Map<string, string[]>();
   // Output saved per session when its agent stops working, as the core does.
   const saved = new Map<string, string>();
+  // Per-card Captain's Log, as the core keeps it: append-only JSONL on disk.
+  const logs = new Map<string, LogEntry[]>();
 
   const stationName = (id: string | null) =>
     ROSTER.locations.flatMap((l) => l.stations).find((s) => s.id === id)?.name ?? null;
@@ -179,6 +181,11 @@ export function createMockBackend(): Backend {
     "l-kira",
     ["> Review the Grafana provisioning PR.", "Reviewed 6 files.", "Finished. Two dashboards hardcode a datasource UID; the rest looks good."].join("\n"),
   );
+  // A seeded log so the console shows a timeline out of the box.
+  logs.set("c2", [
+    { id: "e1", owner: "captain", at: now - 3 * 3600_000, kind: "decision", text: "fix the Loki retention config in place, no chart change", links: [], session_id: null },
+    { id: "e2", owner: "obrien", at: now - 6 * 60_000, kind: "prompt", text: "Fix the Loki retention config and verify in Grafana.", links: [], session_id: "l-obrien" },
+  ]);
 
   const allSessions = () => cards.flatMap((c) => c.sessions);
   const findSession = (paneId: string) => allSessions().find((s) => s.pane_id === paneId);
@@ -312,6 +319,39 @@ export function createMockBackend(): Backend {
       return saved.get(linkId) ?? null;
     },
     focus: async () => {},
+    addArtifact: async (cardId, kind, label, target) => {
+      const c = card(cardId);
+      const id = `a${seq++}`;
+      c.artifacts.push({ id, kind, label, target, last_status: kind === "pr" ? "ci_running" : null, checked_at: Date.now() });
+      notify();
+      return id;
+    },
+    openArtifact: async (cardId, artifactId) => {
+      const a = card(cardId).artifacts.find((x) => x.id === artifactId);
+      if (!a) throw "that artifact no longer exists";
+    },
+    readLog: async (cardId, limit) => {
+      card(cardId);
+      const all = logs.get(cardId) ?? [];
+      return limit ? all.slice(-limit) : [...all];
+    },
+    appendLog: async (cardId, text, opts) => {
+      if (cardId.includes("..") || cardId.includes("/")) throw `not a usable card id: ${cardId}`;
+      card(cardId);
+      if (!text.trim()) throw "write something first";
+      const e: LogEntry = {
+        id: `e${seq++}`,
+        owner: "captain",
+        at: Date.now(),
+        kind: opts?.kind ?? "note",
+        text: text.trim(),
+        links: [],
+        session_id: opts?.sessionId ?? null,
+      };
+      logs.set(cardId, [...(logs.get(cardId) ?? []), e]);
+      notify();
+      return e;
+    },
     onChange: (cb) => {
       listeners.add(cb);
       return () => listeners.delete(cb);
