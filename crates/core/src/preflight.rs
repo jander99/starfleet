@@ -55,6 +55,27 @@ if [ ! -x \"$p\" ]; then p=$(bash -lic 'command -v {name}' 2>/dev/null | tail -n
     )
 }
 
+/// GITHUB_TOKEN presence, as a check. Never reads or prints the value.
+fn github_token_check(set: bool) -> Check {
+    if set {
+        check(
+            "github.token",
+            "GitHub token",
+            CheckStatus::Ok,
+            "GITHUB_TOKEN is set",
+            None,
+        )
+    } else {
+        check(
+            "github.token",
+            "GitHub token",
+            CheckStatus::Warn,
+            "GITHUB_TOKEN is not set",
+            Some("export GITHUB_TOKEN=… (a classic PAT with repo scope), or run `gh auth login`."),
+        )
+    }
+}
+
 async fn tool_check(env: &HostEnv, name: &str, label: &str, required: bool, fix: &str) -> Check {
     let id = format!("tool.{name}");
     match env.sh(&find_tool_script(name)).await {
@@ -273,5 +294,63 @@ pub async fn run(env: &HostEnv, client: &HerdrClient) -> Vec<Check> {
         .await,
     );
     out.push(claude_mem_check(env).await);
+    out.push(
+        tool_check(
+            env,
+            "gh",
+            "GitHub CLI",
+            false,
+            "Install gh: https://cli.github.com, then `gh auth login` or export GITHUB_TOKEN.",
+        )
+        .await,
+    );
+    let token_set = matches!(env.sh("[ -n \"$GITHUB_TOKEN\" ] && echo set || echo unset").await,
+        Ok(o) if o.ok && o.stdout == "set");
+    out.push(github_token_check(token_set));
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::env::HostEnv;
+    use crate::herdr::Endpoint;
+
+    #[test]
+    fn an_unset_token_is_a_warning_with_a_fix() {
+        let c = github_token_check(false);
+        assert_eq!(c.id, "github.token");
+        assert_eq!(c.status, CheckStatus::Warn);
+        assert!(c.fix.unwrap().contains("GITHUB_TOKEN"));
+    }
+
+    #[test]
+    fn a_set_token_is_ok_and_never_prints_its_value() {
+        let c = github_token_check(true);
+        assert_eq!(c.status, CheckStatus::Ok);
+        assert!(!c.detail.contains("ghp_"));
+        assert!(c.detail.contains("set"));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn the_token_probe_reads_the_environment() {
+        let out = HostEnv::Native
+            .sh("GITHUB_TOKEN=abc [ -n \"$GITHUB_TOKEN\" ] && echo set || echo unset")
+            .await
+            .unwrap();
+        assert_eq!(out.stdout, "set");
+    }
+
+    #[tokio::test]
+    async fn run_reports_the_gh_and_token_checks() {
+        let env = HostEnv::Native;
+        let client = HerdrClient::new(Endpoint::Unix("/nonexistent/herdr.sock".into()));
+        let checks = run(&env, &client).await;
+        assert!(checks.iter().any(|c| c.id == "github.token"));
+        // gh itself is only asserted when the host has it installed.
+        if env.sh("command -v gh").await.map(|o| o.ok).unwrap_or(false) {
+            assert!(checks.iter().any(|c| c.id == "tool.gh"));
+        }
+    }
 }
