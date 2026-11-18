@@ -1,5 +1,5 @@
 import { useEffect, type ReactNode } from "react";
-import type { Status } from "./api";
+import type { CardState, Status } from "./api";
 
 export const STATUS_LABEL: Record<Status, string> = {
   blocked: "Needs you",
@@ -15,6 +15,27 @@ export function StatusPill({ status }: { status: Status }) {
     <span className={`pill status-${status}`}>
       <span className="dot" />
       {STATUS_LABEL[status]}
+    </span>
+  );
+}
+
+/** A card's derived state, which is coarser than a session's status. */
+export const CARD_STATE_LABEL: Record<CardState, string> = {
+  blocked: "Needs you",
+  interrupted: "Interrupted",
+  done: "Finished",
+  paused: "Paused",
+  working: "Working",
+  idle: "Idle",
+  offline: "Offline",
+  empty: "No sessions",
+};
+
+export function CardStatePill({ state }: { state: CardState }) {
+  return (
+    <span className={`pill card-state-${state}`}>
+      <span className="dot" />
+      {CARD_STATE_LABEL[state]}
     </span>
   );
 }

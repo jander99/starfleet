@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { attentionSorted } from "../attention";
 import { backend, errorText, type BoardView, type Card, type Contact, type Session } from "../api";
-import { ErrorNote, StatusPill, timeAgo } from "../ui";
+import { CardStatePill, ErrorNote, StatusPill, timeAgo } from "../ui";
 
 function SessionRow({ session, onOpen }: { session: Session; onOpen: () => void }) {
   return (
@@ -36,6 +36,7 @@ function CardPanel(props: {
       <header>
         <div className="card-title">
           <h3>{card.title}</h3>
+          <CardStatePill state={card.state} />
           <code className="ellipsis" title={card.cwd}>
             {card.cwd}
           </code>

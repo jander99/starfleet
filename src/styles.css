@@ -254,6 +254,27 @@ main {
 .status-offline {
   --c: var(--offline);
 }
+/* Card state: coarser than a session status, same palette. */
+.card-state-blocked,
+.card-state-interrupted {
+  --c: var(--blocked);
+}
+.card-state-paused {
+  --c: var(--offline);
+}
+.card-state-working {
+  --c: var(--working);
+}
+.card-state-idle,
+.card-state-empty {
+  --c: var(--idle);
+}
+.card-state-done {
+  --c: var(--done);
+}
+.card-state-offline {
+  --c: var(--offline);
+}
 .dot {
   width: 8px;
   height: 8px;

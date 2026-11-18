@@ -38,3 +38,18 @@ describe("attention ordering", () => {
     expect(attentionSorted(tie).map((c) => c.id)).toEqual(["y", "x"]);
   });
 });
+
+import { CARD_STATE_LABEL } from "../ui";
+
+describe("card state pill", () => {
+  it("labels every card state, paused and interrupted differently", () => {
+    expect(CARD_STATE_LABEL.blocked).toBe("Needs you");
+    expect(CARD_STATE_LABEL.interrupted).toBe("Interrupted");
+    expect(CARD_STATE_LABEL.paused).toBe("Paused");
+    expect(CARD_STATE_LABEL.working).toBe("Working");
+    // Every core state has a label — the core's CardState is the same set.
+    expect(Object.keys(CARD_STATE_LABEL).sort()).toEqual(
+      ["blocked", "done", "empty", "idle", "interrupted", "offline", "paused", "working"],
+    );
+  });
+});
