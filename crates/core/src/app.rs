@@ -5,7 +5,7 @@ use crate::herdr::{Endpoint, HerdrClient, HerdrError, PaneInfo, Snapshot};
 use crate::paths::{Paths, Settings};
 use crate::preflight::{self, Check};
 use crate::stations::Roster;
-use crate::store::{now_ms, short_id, SessionLink, Store};
+use crate::store::{now_ms, short_id, Artifact, ArtifactKind, SessionLink, Store};
 use crate::view::{self, BoardView};
 use anyhow::{anyhow, bail, Context, Result};
 use serde::{Deserialize, Serialize};
@@ -41,6 +41,7 @@ pub struct Starfleet {
     client: HerdrClient,
     roster: Roster,
     store: Mutex<Store>,
+    paths: Paths,
     live: RwLock<Live>,
     changed: watch::Sender<u64>,
 }
@@ -95,11 +96,13 @@ impl Starfleet {
         let endpoint = options
             .endpoint
             .unwrap_or_else(|| Endpoint::resolve(&settings, &env));
+        let board = paths.board_file();
         let (changed, _) = watch::channel(0);
         Ok(Arc::new(Self {
             client: HerdrClient::new(endpoint),
             roster: Roster::load_or_seed(&paths)?,
-            store: Mutex::new(Store::load(paths.board_file())?),
+            store: Mutex::new(Store::load(board)?),
+            paths,
             live: RwLock::new(Live::default()),
             env,
             changed,
@@ -113,6 +116,32 @@ impl Starfleet {
 
     fn notify(&self) {
         self.changed.send_modify(|n| *n += 1);
+    }
+
+    /// Attach an artifact to a card and let the UI know.
+    pub fn add_artifact(
+        &self,
+        card_id: &str,
+        kind: ArtifactKind,
+        label: &str,
+        target: &str,
+    ) -> Result<String> {
+        let target = target.trim();
+        if target.is_empty() {
+            bail!("an artifact needs a target");
+        }
+        let artifact = Artifact {
+            id: short_id(),
+            kind,
+            label: label.trim().to_string(),
+            target: target.to_string(),
+            last_status: None,
+            checked_at: None,
+        };
+        let id = artifact.id.clone();
+        self.store.lock().unwrap().add_artifact(card_id, artifact)?;
+        self.notify();
+        Ok(id)
     }
 
     pub fn roster(&self) -> &Roster {
