@@ -9,7 +9,7 @@ const station = (id: string, name: string, post: string, duty: string) => ({
   name,
   post,
   duty,
-  agent: "claude",
+  harness: "claude",
   model: null,
   args: [],
   prompt: `(${duty})`,
@@ -111,6 +111,9 @@ export function createMockBackend(): Backend {
       done: false,
       created_at: now - 3 * 3600_000,
       updated_at: now - 60_000,
+      artifacts: [],
+      state: "blocked",
+      kind: "repo",
       sessions: [
         session("w1:p2", "enterprise.laforge", "blocked", "Add a pattern delete to the cache wrapper.", 12),
         session("w1:p1", "daystrom.research", "done", "Can the library delete cache keys by pattern?", 34),
@@ -124,6 +127,18 @@ export function createMockBackend(): Backend {
       done: false,
       created_at: now - 26 * 3600_000,
       updated_at: now - 20 * 60_000,
+      artifacts: [
+        {
+          id: "a1",
+          kind: "pr",
+          label: "PR #25",
+          target: "https://github.com/jander99/starfleet/pull/25",
+          last_status: "ci_running",
+          checked_at: now - 30_000,
+        },
+      ],
+      state: "working",
+      kind: "meta",
       sessions: [
         session("w2:p1", "ds9.obrien", "working", "Fix the Loki retention config and verify in Grafana.", 6),
         session("w2:p0", "ds9.kira", "offline", "Review the Grafana provisioning PR.", 600, {
@@ -140,6 +155,9 @@ export function createMockBackend(): Backend {
       done: true,
       created_at: now - 30 * 24 * 3600_000,
       updated_at: now - 29 * 24 * 3600_000,
+      artifacts: [],
+      state: "empty",
+      kind: "repo_in_meta",
       sessions: [],
     },
   ];
@@ -225,7 +243,19 @@ export function createMockBackend(): Backend {
       if (!title.trim()) throw "a card needs a title";
       if (!cwd.trim().startsWith("/") && !cwd.trim().startsWith("~")) throw `\`${cwd}\` is not a folder in linux`;
       const id = `c${seq++}`;
-      cards.push({ id, title: title.trim(), cwd: cwd.trim(), notes: notes.trim(), done: false, created_at: Date.now(), updated_at: Date.now(), sessions: [] });
+      cards.push({
+        id,
+        title: title.trim(),
+        cwd: cwd.trim(),
+        notes: notes.trim(),
+        done: false,
+        created_at: Date.now(),
+        updated_at: Date.now(),
+        sessions: [],
+        artifacts: [],
+        state: "empty",
+        kind: "repo",
+      });
       notify();
       return id;
     },

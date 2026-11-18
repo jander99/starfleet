@@ -299,6 +299,8 @@ dangling or cyclic chain cannot loop.
 - newest session **not live** → `paused` or `interrupted`, from its
   `end_reason`.
 
+Blocked aggregates across live sessions: a permission prompt on an older session is never hidden by a newer working one. Everything else is decided by the newest session.
+
 An older interrupted session that was later resumed does not count. The
 attention sort (§7) runs on this derived state: `blocked` first, then
 `interrupted` (the `stale` tier), then `needs decision`, then `working`.

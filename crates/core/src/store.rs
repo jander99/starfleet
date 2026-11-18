@@ -34,6 +34,56 @@ pub struct Card {
     pub done: bool,
     pub created_at: u64,
     pub updated_at: u64,
+    /// Durable things this card points at: a PR, a URL, a note, a pane.
+    /// They outlive the panes, which is the point.
+    #[serde(default)]
+    pub artifacts: Vec<Artifact>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ArtifactKind {
+    Pr,
+    Url,
+    Note,
+    Pane,
+}
+
+/// A durable pointer attached to a card. `last_status`/`checked_at` are the
+/// last poll's answer, kept so a stale PR state is visible as stale.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Artifact {
+    pub id: String,
+    pub kind: ArtifactKind,
+    pub label: String,
+    pub target: String,
+    pub last_status: Option<String>,
+    pub checked_at: Option<u64>,
+}
+
+/// Why a session ended, stamped by Starfleet when it closes a pane.
+/// No stamp means the pane vanished without us: interrupted.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EndReason {
+    Captain,
+    IdleTimeout,
+    Interrupted,
+    #[default]
+    #[serde(other)]
+    Unknown,
+}
+
+/// A heuristic guess at why an agent stopped, from its output tail. Inert
+/// data: shown as "probably", never used to drive behavior.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CauseHint {
+    RateLimit,
+    UsageWindow,
+    Outage,
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -63,6 +113,44 @@ pub struct SessionLink {
     pub output: Option<String>,
     /// When `output` was last read (or found empty).
     pub output_at: Option<u64>,
+    /// The session this one resumed, if any. History only: the newest link
+    /// (by `created_at`) decides a card's state, not the chain.
+    pub resumed_from: Option<String>,
+    /// The directory this session was aimed at, which may differ from the
+    /// live pane's cwd when a card spans a meta directory.
+    pub cwd: Option<String>,
+    /// Why the session ended; `None` while it runs, or when it died unstamped.
+    pub end_reason: Option<EndReason>,
+    pub ended_at: Option<u64>,
+    /// Optional, heuristic; see [`CauseHint`].
+    pub cause_hint: Option<CauseHint>,
+}
+
+/// Walk a resume chain from `start`, newest first, as ids.
+///
+/// History only — card state comes from the newest link by `created_at`, not
+/// from this walk — but the walk is still guarded: it stops at an unknown id,
+/// at an id seen before (a cycle), or after 1000 entries.
+pub fn resume_chain(links: &[SessionLink], start: &str) -> Vec<String> {
+    let by_id: std::collections::HashMap<&str, &SessionLink> =
+        links.iter().map(|l| (l.id.as_str(), l)).collect();
+    let mut visited = std::collections::HashSet::new();
+    let mut chain = Vec::new();
+    let mut current = start;
+    while chain.len() < 1000 {
+        let Some(link) = by_id.get(current) else {
+            break;
+        };
+        if !visited.insert(link.id.clone()) {
+            break;
+        }
+        chain.push(link.id.clone());
+        let Some(next) = link.resumed_from.as_deref() else {
+            break;
+        };
+        current = next;
+    }
+    chain
 }
 
 /// The most saved output kept per session, in bytes. The end is kept.
@@ -192,6 +280,7 @@ impl Store {
             done: false,
             created_at: now,
             updated_at: now,
+            artifacts: Vec::new(),
         };
         self.board.cards.push(card.clone());
         self.save()?;
@@ -240,6 +329,43 @@ impl Store {
 
     pub fn add_link(&mut self, link: SessionLink) -> Result<()> {
         self.board.links.push(link);
+        self.save()
+    }
+
+    /// Attach a durable artifact to a card. An unknown card is an error.
+    pub fn add_artifact(&mut self, card_id: &str, artifact: Artifact) -> Result<()> {
+        let card = self
+            .board
+            .cards
+            .iter_mut()
+            .find(|c| c.id == card_id)
+            .ok_or_else(|| anyhow!("that card no longer exists"))?;
+        card.artifacts.push(artifact);
+        self.save()
+    }
+
+    /// Record a poll's answer for an artifact. A vanished artifact is an
+    /// error, not a panic: the card may have been edited since the poll began.
+    pub fn update_artifact(
+        &mut self,
+        card_id: &str,
+        artifact_id: &str,
+        last_status: Option<&str>,
+        checked_at: Option<u64>,
+    ) -> Result<()> {
+        let card = self
+            .board
+            .cards
+            .iter_mut()
+            .find(|c| c.id == card_id)
+            .ok_or_else(|| anyhow!("that card no longer exists"))?;
+        let artifact = card
+            .artifacts
+            .iter_mut()
+            .find(|a| a.id == artifact_id)
+            .ok_or_else(|| anyhow!("that artifact no longer exists"))?;
+        artifact.last_status = last_status.map(str::to_string);
+        artifact.checked_at = checked_at;
         self.save()
     }
 
@@ -301,6 +427,40 @@ impl Store {
         (changed, capture)
     }
 
+    /// Record why a session ended. A vanished link is an error, not a panic.
+    pub fn end_session(&mut self, link_id: &str, reason: EndReason) -> Result<()> {
+        let link = self
+            .board
+            .links
+            .iter_mut()
+            .find(|l| l.id == link_id)
+            .ok_or_else(|| anyhow!("that session no longer exists"))?;
+        link.end_reason = Some(reason);
+        link.ended_at = Some(now_ms());
+        self.save()
+    }
+
+    /// Link ids eligible for idle parking: not ended, not blocked, and last
+    /// seen at least `idle_ms` before `now`.
+    ///
+    /// This is a pure store query over link fields — it does not read a Herdr
+    /// snapshot. Liveness is checked by the caller (`app.rs`) at park time.
+    pub fn park_candidates(&self, now: u64, idle_ms: u64) -> Vec<String> {
+        self.board
+            .links
+            .iter()
+            .filter(|l| l.end_reason.is_none())
+            .filter(|l| l.last_status != AgentStatus::Blocked)
+            // saturating: a wrapping add would make a far-future last_seen
+            // look long overdue and park a session that just ran.
+            .filter(|l| {
+                l.last_seen
+                    .is_some_and(|t| t.saturating_add(idle_ms) <= now)
+            })
+            .map(|l| l.id.clone())
+            .collect()
+    }
+
     /// Keep the end of a session's output on its link. Empty output leaves an
     /// earlier record in place. Returns whether the link still exists.
     pub fn record_output(&mut self, link_id: &str, text: &str) -> Result<bool> {
@@ -344,6 +504,217 @@ mod tests {
             agent: Some("claude".into()),
             ..PaneInfo::default()
         }
+    }
+
+    #[test]
+    fn a_board_written_before_the_lifecycle_fields_still_loads() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("board.json");
+        std::fs::write(
+            &file,
+            r#"{"cards":[{"id":"c1","title":"t","cwd":"/w","notes":"","done":false,"created_at":1,"updated_at":1}],
+                "links":[{"id":"l1","card_id":"c1","created_at":2}]}"#,
+        )
+        .unwrap();
+        let store = Store::load(file).unwrap();
+        let link = &store.board.links[0];
+        assert_eq!(link.resumed_from, None);
+        assert_eq!(link.cwd, None);
+        assert_eq!(link.end_reason, None);
+        assert_eq!(link.ended_at, None);
+        assert_eq!(link.cause_hint, None);
+    }
+
+    #[test]
+    fn a_cause_hint_round_trips_and_an_unknown_value_falls_back() {
+        assert_eq!(
+            serde_json::from_str::<CauseHint>("\"usage_window\"").unwrap(),
+            CauseHint::UsageWindow
+        );
+        // Deserialized into the field, an unseen variant does not fail the board load.
+        let link: SessionLink =
+            serde_json::from_str(r#"{"id":"l1","cause_hint":"provider_outage"}"#).unwrap();
+        assert_eq!(link.cause_hint, Some(CauseHint::Unknown));
+    }
+
+    #[test]
+    fn an_end_reason_round_trips_and_unknown_values_fall_back() {
+        let cases = [
+            ("\"captain\"", EndReason::Captain),
+            ("\"idle_timeout\"", EndReason::IdleTimeout),
+            ("\"interrupted\"", EndReason::Interrupted),
+            ("\"provider_outage\"", EndReason::Unknown),
+        ];
+        for (json, expected) in cases {
+            assert_eq!(serde_json::from_str::<EndReason>(json).unwrap(), expected);
+        }
+        assert_eq!(
+            serde_json::to_string(&EndReason::IdleTimeout).unwrap(),
+            "\"idle_timeout\""
+        );
+    }
+
+    #[test]
+    fn an_artifact_survives_a_reload() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("board.json");
+        let mut store = Store::load(file.clone()).unwrap();
+        let card = store.create_card("pr work", "/w", "").unwrap();
+        store
+            .add_artifact(
+                &card.id,
+                Artifact {
+                    id: "a1".into(),
+                    kind: ArtifactKind::Pr,
+                    label: "PR #25".into(),
+                    target: "https://github.com/jander99/starfleet/pull/25".into(),
+                    last_status: None,
+                    checked_at: None,
+                },
+            )
+            .unwrap();
+        store
+            .update_artifact(&card.id, "a1", Some("ci_running"), Some(42))
+            .unwrap();
+        let reloaded = Store::load(file).unwrap();
+        let a = &reloaded.card(&card.id).unwrap().artifacts[0];
+        assert_eq!(a.last_status.as_deref(), Some("ci_running"));
+        assert_eq!(a.checked_at, Some(42));
+    }
+
+    #[test]
+    fn updating_an_unknown_artifact_is_an_error_not_a_panic() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::load(dir.path().join("board.json")).unwrap();
+        let card = store.create_card("c", "/w", "").unwrap();
+        assert!(store
+            .update_artifact(&card.id, "nope", Some("x"), None)
+            .is_err());
+    }
+
+    #[test]
+    fn the_resume_chain_stops_at_a_dangling_id() {
+        let links = vec![
+            SessionLink {
+                id: "a".into(),
+                resumed_from: None,
+                ..Default::default()
+            },
+            SessionLink {
+                id: "b".into(),
+                resumed_from: Some("a".into()),
+                ..Default::default()
+            },
+            SessionLink {
+                id: "c".into(),
+                resumed_from: Some("missing".into()),
+                ..Default::default()
+            },
+        ];
+        assert_eq!(
+            resume_chain(&links, "b"),
+            vec!["b".to_string(), "a".to_string()]
+        );
+        assert_eq!(resume_chain(&links, "c"), vec!["c".to_string()]);
+        assert_eq!(resume_chain(&links, "nope"), Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_cyclic_resume_chain_does_not_loop() {
+        let links = vec![
+            SessionLink {
+                id: "a".into(),
+                resumed_from: Some("b".into()),
+                ..Default::default()
+            },
+            SessionLink {
+                id: "b".into(),
+                resumed_from: Some("a".into()),
+                ..Default::default()
+            },
+        ];
+        let chain = resume_chain(&links, "a");
+        assert_eq!(chain.len(), 2);
+    }
+
+    #[test]
+    fn parking_skips_blocked_and_recent_sessions() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::load(dir.path().join("board.json")).unwrap();
+        for (id, seen, status) in [
+            ("old", 0u64, AgentStatus::Idle),
+            // 1_000_000: seen after now - idle_ms, so not yet parkable.
+            ("fresh", 1_000_000, AgentStatus::Idle),
+            ("waiting", 0, AgentStatus::Blocked),
+            ("closed", 0, AgentStatus::Done),
+        ] {
+            let mut link = SessionLink {
+                id: id.into(),
+                last_seen: Some(seen),
+                last_status: status,
+                ..Default::default()
+            };
+            if id == "closed" {
+                link.end_reason = Some(EndReason::Captain);
+                link.ended_at = Some(1);
+            }
+            store.board.links.push(link);
+        }
+        // now is past old's idle deadline (0 + 3_600_000) but not fresh's (1_000_000 + 3_600_000).
+        assert_eq!(
+            store.park_candidates(4_000_000, 3_600_000),
+            vec!["old".to_string()]
+        );
+    }
+
+    #[test]
+    fn parking_arithmetic_does_not_overflow() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::load(dir.path().join("board.json")).unwrap();
+        store.board.links.push(SessionLink {
+            id: "far".into(),
+            last_seen: Some(u64::MAX - 5),
+            last_status: AgentStatus::Idle,
+            ..Default::default()
+        });
+        // A wrapping add would make a far-future last_seen look long overdue.
+        assert!(store.park_candidates(1_000, 10).is_empty());
+    }
+
+    #[test]
+    fn a_park_candidate_at_exactly_the_deadline_is_parked() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::load(dir.path().join("board.json")).unwrap();
+        store.board.links.push(SessionLink {
+            id: "edge".into(),
+            last_seen: Some(1_000),
+            last_status: AgentStatus::Idle,
+            ..Default::default()
+        });
+        // The documented rule is `t + idle_ms <= now`: exactly at the deadline counts.
+        assert_eq!(
+            store.park_candidates(4_000, 3_000),
+            vec!["edge".to_string()]
+        );
+        assert!(store.park_candidates(3_999, 3_000).is_empty());
+    }
+
+    #[test]
+    fn ending_a_session_stamps_reason_and_time_and_persists() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("board.json");
+        let mut store = Store::load(file.clone()).unwrap();
+        store.board.links.push(SessionLink {
+            id: "l1".into(),
+            ..Default::default()
+        });
+        store.end_session("l1", EndReason::IdleTimeout).unwrap();
+        let reloaded = Store::load(file).unwrap();
+        let link = &reloaded.board.links[0];
+        assert_eq!(link.end_reason, Some(EndReason::IdleTimeout));
+        assert!(link.ended_at.is_some());
+        let mut again = reloaded;
+        assert!(again.end_session("missing", EndReason::Captain).is_err());
     }
 
     #[test]

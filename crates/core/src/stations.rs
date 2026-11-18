@@ -20,7 +20,9 @@ pub struct Station {
     #[serde(default)]
     pub duty: String,
     /// Herdr agent kind: "claude", "opencode", "codex", ...
-    pub agent: String,
+    /// Serialized as `harness`; `agent` is still accepted when reading.
+    #[serde(alias = "agent")]
+    pub harness: String,
     #[serde(default)]
     pub model: Option<String>,
     #[serde(default)]
@@ -73,6 +75,27 @@ impl Roster {
 mod tests {
     use super::*;
     use std::collections::HashSet;
+
+    fn station_json(harness_key: &str) -> String {
+        format!(
+            r#"{{"id":"s","name":"Data","post":"","duty":"",{harness_key}:"claude","model":null,"args":[],"prompt":""}}"#
+        )
+    }
+
+    #[test]
+    fn the_old_agent_key_still_parses() {
+        let st: Station = serde_json::from_str(&station_json("\"agent\"")).unwrap();
+        assert_eq!(st.harness, "claude");
+        let out = serde_json::to_string(&st).unwrap();
+        assert!(out.contains("\"harness\""));
+        assert!(!out.contains("\"agent\""));
+    }
+
+    #[test]
+    fn the_new_harness_key_parses_too() {
+        let st: Station = serde_json::from_str(&station_json("\"harness\"")).unwrap();
+        assert_eq!(st.harness, "claude");
+    }
 
     #[test]
     fn builtin_roster_has_unique_station_ids() {

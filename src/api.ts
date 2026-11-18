@@ -7,6 +7,29 @@ import { createMockBackend } from "./mock";
 
 export type Status = "blocked" | "done" | "working" | "idle" | "unknown" | "offline";
 
+/** Why a session ended, stamped by the core. `unknown` is an unseen value. */
+export type EndReason = "captain" | "idle_timeout" | "interrupted" | "unknown";
+
+/** A card's state, derived from its sessions by the core. */
+export type CardState =
+  | "empty" | "blocked" | "working" | "idle" | "done"
+  | "paused" | "interrupted" | "offline";
+
+/** What a project path is: one repo, a directory of repos, or a repo in one. */
+export type ProjectKind = "repo" | "meta" | "repo_in_meta";
+
+export type ArtifactKind = "pr" | "url" | "note" | "pane";
+
+/** A durable pointer on a card (a PR, a URL, a note, a pane). */
+export interface Artifact {
+  id: string;
+  kind: ArtifactKind;
+  label: string;
+  target: string;
+  last_status: string | null;
+  checked_at: number | null;
+}
+
 export interface Session {
   link_id: string;
   status: Status;
@@ -25,6 +48,10 @@ export interface Session {
   last_seen: number | null;
   /** When the end of the output was last saved; null if nothing is saved. */
   output_at: number | null;
+  /** Why the session ended, if the core stamped it. */
+  end_reason?: EndReason | null;
+  /** The session this one resumed, if any. History only. */
+  resumed_from?: string | null;
 }
 
 export interface Card {
@@ -36,6 +63,11 @@ export interface Card {
   created_at: number;
   updated_at: number;
   sessions: Session[];
+  /** Durable pointers that outlive the panes. */
+  artifacts: Artifact[];
+  /** Derived from `sessions` by the core; never stored. */
+  state: CardState;
+  kind: ProjectKind;
 }
 
 export interface Contact {
@@ -70,7 +102,7 @@ export interface Station {
   name: string;
   post: string;
   duty: string;
-  agent: string;
+  harness: string;
   model: string | null;
   args: string[];
   prompt: string;

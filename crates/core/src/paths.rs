@@ -61,6 +61,13 @@ impl Paths {
     pub fn board_file(&self) -> PathBuf {
         self.data_dir.join("board.json")
     }
+    /// Per-card logs live beside the board, one JSONL file each.
+    pub fn logs_dir(&self) -> PathBuf {
+        self.data_dir.join("logs")
+    }
+    pub fn log_file(&self, card_id: &str) -> PathBuf {
+        self.logs_dir().join(format!("{card_id}.jsonl"))
+    }
 }
 
 pub fn home_dir() -> Option<PathBuf> {

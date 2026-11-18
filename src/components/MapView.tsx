@@ -122,7 +122,7 @@ export function LocationView(props: {
                 <span className="officer">{st.name}</span>
                 <span className="duty">{st.duty}</span>
                 <span className="chip">
-                  {st.agent}
+                  {st.harness}
                   {st.model ? ` · ${st.model}` : ""}
                 </span>
               </button>
