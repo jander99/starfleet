@@ -54,3 +54,21 @@ describe("mock backend", () => {
     expect(r.locations.length).toBeGreaterThan(0);
   });
 });
+
+describe("mirrored core contract", () => {
+  it("cards carry a derived state and a project kind", async () => {
+    const v = await createMockBackend().view();
+    for (const c of v.cards) {
+      expect(["empty", "blocked", "working", "idle", "done", "paused", "interrupted", "offline"]).toContain(c.state);
+      expect(["repo", "meta", "repo_in_meta"]).toContain(c.kind);
+      expect(Array.isArray(c.artifacts)).toBe(true);
+    }
+  });
+
+  it("stations expose their harness under the new name", async () => {
+    const b = createMockBackend();
+    const st = (await b.roster()).locations[0].stations[0] as unknown as Record<string, unknown>;
+    expect(st.harness).toBe("claude");
+    expect(st.agent).toBeUndefined();
+  });
+});

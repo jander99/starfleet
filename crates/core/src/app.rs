@@ -367,7 +367,7 @@ impl Starfleet {
         if card.cwd.is_empty() {
             bail!("this card has no working directory yet");
         }
-        let kind = non_empty(req.agent).unwrap_or_else(|| station.agent.clone());
+        let kind = non_empty(req.agent).unwrap_or_else(|| station.harness.clone());
         let mut args = station.args.clone();
         if let Some(model) = non_empty(req.model).or_else(|| non_empty(station.model.clone())) {
             args.push("--model".into());

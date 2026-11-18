@@ -186,7 +186,7 @@ export function DispatchDialog(props: {
           <label>
             Agent
             <select value={agent} onChange={(e) => setAgent(e.target.value)}>
-              <option value="">Station default ({station?.agent})</option>
+              <option value="">Station default ({station?.harness})</option>
               {AGENTS.map((a) => (
                 <option key={a} value={a}>
                   {a}
