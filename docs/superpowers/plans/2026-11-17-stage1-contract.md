@@ -114,7 +114,7 @@ fn a_board_written_before_the_lifecycle_fields_still_loads() {
 }
 
 #[test]
-fn a_cause_hint_round_trips_and_an_unknown_value_is_ignored() {
+fn a_cause_hint_round_trips_and_an_unknown_value_falls_back() {
     assert_eq!(
         serde_json::from_str::<CauseHint>("\"usage_window\"").unwrap(),
         CauseHint::UsageWindow
@@ -160,11 +160,7 @@ fn an_end_reason_round_trips_and_unknown_values_fall_back() {
 
 - [ ] **Step 6: Run it, then commit**
 
-Run: `cargo test -p starfleet-core an_end_reason_round_trips` and `cargo test -p starfleet-core a_cause_hint_round_trips` → PASS.
-
-Note on the enum fallback: `EndReason` has `#[default] Unknown` *and* `#[serde(other)] Unknown`, which
-serde rejects as a duplicate. Keep `#[serde(other)]` on the variant and drop the `#[default]`, or make
-the field's default explicit — the board-load test above is the check.
+Run: `cargo test -p starfleet-core an_end_reason_round_trips` and `cargo test -p starfleet-core a_cause_hint_round_trips_and_an_unknown_value_falls_back` → PASS.
 
 ```bash
 git add crates/core/src/store.rs
@@ -463,7 +459,7 @@ Expected: PASS. If `e2e.rs` asserts on the serialized view, extend the expectati
 - [ ] **Step 6: Update the spec**
 
 Two edits to §8.2 of the design doc:
-1. Replace "**Only the newest session decides** (by `created_at`, following the `resumed_from` chain)" with "**Only the newest session decides** (by `created_at`, then id). The `resumed_from` chain is history display, not state: a resumed session is a newer link with a later `created_at`, and not walking the chain means a dangling or cyclic chain cannot loop."
+1. Confirm §8.2 already says "**Only the newest session decides** (by `created_at`, then id)" with the chain-is-history sentence (edited on `docs/bridge-design`); if a rebase onto `main` lost it, restore it.
 2. After the bullet list, add: *"Blocked aggregates across live sessions: a permission prompt on an older session is never hidden by a newer working one. Everything else is decided by the newest session."*
 
 - [ ] **Step 7: Commit**
@@ -799,8 +795,9 @@ git commit -m "feat: station harness rename (aliased) and mirrored contract in t
 
 - **`cause_hint` on interrupted sessions.** A usage-limit or provider-outage death has no Starfleet stamp,
   so it reads as `interrupted` and invites a resume that will fail again. Stage 1 ships only the inert
-  field, `SessionLink.cause_hint: Option<CauseHint>` with `CauseHint { RateLimit, UsageWindow, Outage }`
-  (present = a hint, absent = none; no `Unknown` variant) and its serde fallback test in Task 1. The
+  field, `SessionLink.cause_hint: Option<CauseHint>` with `CauseHint { RateLimit, UsageWindow, Outage,
+  Unknown }` — `Unknown` is the inert fallback for an unseen variant, `None` means no hint — and its
+  serde fallback test in Task 1. The
   output-tail scan that fills it, ranking hinted cards in the attention sort, and the repeat-failure
   counter all wait for slice two, when `end_session` and parking exist — and because they change
   behavior, they need a spec change first: §8.1's "never used to drive behavior" would have to be

@@ -289,8 +289,10 @@ Rules:
 ### 8.2 Card state is derived
 
 Under option A (§11.1) a card holds many sessions, so its state is computed,
-never stored. **Only the newest session decides** (by `created_at`, following
-the `resumed_from` chain):
+never stored. **Only the newest session decides** (by `created_at`, then id).
+The `resumed_from` chain is history display, not state: a resumed session is
+a newer link with a later `created_at`, and not walking the chain means a
+dangling or cyclic chain cannot loop.
 
 - newest session **live** → the card shows its status: `blocked`, `working`,
   `idle` or `done`;
