@@ -8,6 +8,7 @@ pub mod env;
 pub mod herdr;
 pub mod log;
 pub mod paths;
+pub mod pr;
 pub mod preflight;
 pub mod project;
 pub mod stations;

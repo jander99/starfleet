@@ -61,6 +61,14 @@ pub struct Artifact {
     pub checked_at: Option<u64>,
 }
 
+/// One PR artifact, flattened out of its card, for the poller.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PrArtifact {
+    pub card_id: String,
+    pub artifact_id: String,
+    pub target: String,
+}
+
 /// Why a session ended, stamped by Starfleet when it closes a pane.
 /// No stamp means the pane vanished without us: interrupted.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -367,6 +375,26 @@ impl Store {
         artifact.last_status = last_status.map(str::to_string);
         artifact.checked_at = checked_at;
         self.save()
+    }
+
+    /// Every `ArtifactKind::Pr` artifact on the board, with its card.
+    /// Done cards are skipped: a finished card costs no gh calls.
+    pub fn pr_artifacts(&self) -> Vec<PrArtifact> {
+        self.board
+            .cards
+            .iter()
+            .filter(|c| !c.done)
+            .flat_map(|c| {
+                c.artifacts
+                    .iter()
+                    .filter(|a| a.kind == ArtifactKind::Pr)
+                    .map(|a| PrArtifact {
+                        card_id: c.id.clone(),
+                        artifact_id: a.id.clone(),
+                        target: a.target.clone(),
+                    })
+            })
+            .collect()
     }
 
     pub fn remove_link(&mut self, link_id: &str) -> Result<()> {
@@ -824,5 +852,46 @@ mod tests {
         let mut restored = pane("w1:p1", "term_50");
         restored.agent_session = Some(session);
         assert!(link.find_live(&[restored]).is_some());
+    }
+
+    #[test]
+    fn pr_artifacts_lists_every_pr_with_its_card() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::load(dir.path().join("board.json")).unwrap();
+        let a = store.create_card("a", "/w", "").unwrap();
+        let b = store.create_card("b", "/w", "").unwrap();
+        let art = |id: &str, kind: ArtifactKind, target: &str| Artifact {
+            id: id.into(),
+            kind,
+            label: "x".into(),
+            target: target.into(),
+            last_status: None,
+            checked_at: None,
+        };
+        let url = "https://github.com/o/r/pull/7";
+        store
+            .add_artifact(&a.id, art("p1", ArtifactKind::Pr, url))
+            .unwrap();
+        store
+            .add_artifact(
+                &a.id,
+                art("u1", ArtifactKind::Url, "https://example.test/x"),
+            )
+            .unwrap();
+        store
+            .add_artifact(&b.id, art("p2", ArtifactKind::Pr, url))
+            .unwrap();
+        let prs = store.pr_artifacts();
+        assert_eq!(prs.len(), 2);
+        assert_eq!(prs.iter().filter(|p| p.target == url).count(), 2);
+        assert!(prs
+            .iter()
+            .any(|p| p.card_id == b.id && p.artifact_id == "p2"));
+
+        // A done card costs no gh calls.
+        store
+            .update_card(&b.id, None, None, None, Some(true))
+            .unwrap();
+        assert_eq!(store.pr_artifacts().len(), 1);
     }
 }

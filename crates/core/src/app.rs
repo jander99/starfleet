@@ -3,9 +3,10 @@
 use crate::env::{sh_quote, HostEnv};
 use crate::herdr::{Endpoint, HerdrClient, HerdrError, PaneInfo, Snapshot};
 use crate::paths::{Paths, Settings};
+use crate::pr::{PollOutcome, PrPoller};
 use crate::preflight::{self, Check};
 use crate::stations::Roster;
-use crate::store::{now_ms, short_id, SessionLink, Store};
+use crate::store::{now_ms, short_id, Artifact, ArtifactKind, SessionLink, Store};
 use crate::view::{self, BoardView};
 use anyhow::{anyhow, bail, Context, Result};
 use serde::{Deserialize, Serialize};
@@ -18,6 +19,14 @@ use tokio::sync::watch;
 /// Workspace token that marks a Herdr workspace as belonging to a card.
 const CARD_TOKEN: &str = "starfleet_card";
 
+/// At most this many PRs are handed to `gh` per poll batch; the batch is
+/// polled one at a time, so this is also the concurrency bound.
+const PR_CONCURRENCY: usize = 2;
+
+/// How often the PR poll task wakes. Each PR still has its own cadence, so
+/// a short tick only costs a lock, not a gh call.
+const PR_TICK: Duration = Duration::from_secs(10);
+
 /// How many lines of output are saved when an agent stops working. Matches
 /// what the session drawer shows for a live session.
 const OUTPUT_LINES: u32 = 200;
@@ -28,6 +37,8 @@ pub struct Options {
     pub endpoint: Option<Endpoint>,
     /// Override the host environment; detected when `None`.
     pub env: Option<HostEnv>,
+    /// The `gh` binary for PR polling; PATH is used when `None`.
+    pub gh: Option<String>,
 }
 
 #[derive(Default)]
@@ -41,6 +52,9 @@ pub struct Starfleet {
     client: HerdrClient,
     roster: Roster,
     store: Mutex<Store>,
+    paths: Paths,
+    pr: Mutex<PrPoller>,
+    gh: Option<String>,
     live: RwLock<Live>,
     changed: watch::Sender<u64>,
 }
@@ -95,11 +109,15 @@ impl Starfleet {
         let endpoint = options
             .endpoint
             .unwrap_or_else(|| Endpoint::resolve(&settings, &env));
+        let board = paths.board_file();
         let (changed, _) = watch::channel(0);
         Ok(Arc::new(Self {
             client: HerdrClient::new(endpoint),
             roster: Roster::load_or_seed(&paths)?,
-            store: Mutex::new(Store::load(paths.board_file())?),
+            store: Mutex::new(Store::load(board)?),
+            paths,
+            pr: Mutex::new(PrPoller::new(PR_CONCURRENCY)),
+            gh: options.gh,
             live: RwLock::new(Live::default()),
             env,
             changed,
@@ -115,8 +133,39 @@ impl Starfleet {
         self.changed.send_modify(|n| *n += 1);
     }
 
+    /// Attach an artifact to a card and let the UI know.
+    pub fn add_artifact(
+        &self,
+        card_id: &str,
+        kind: ArtifactKind,
+        label: &str,
+        target: &str,
+    ) -> Result<String> {
+        let target = target.trim();
+        if target.is_empty() {
+            bail!("an artifact needs a target");
+        }
+        let artifact = Artifact {
+            id: short_id(),
+            kind,
+            label: label.trim().to_string(),
+            target: target.to_string(),
+            last_status: None,
+            checked_at: None,
+        };
+        let id = artifact.id.clone();
+        self.store.lock().unwrap().add_artifact(card_id, artifact)?;
+        self.notify();
+        Ok(id)
+    }
+
     pub fn roster(&self) -> &Roster {
         &self.roster
+    }
+
+    /// Where Starfleet keeps its files (board, logs, settings).
+    pub fn paths(&self) -> &Paths {
+        &self.paths
     }
 
     pub fn view(&self) -> BoardView {
@@ -136,6 +185,45 @@ impl Starfleet {
     }
 
     // ---- Herdr state -----------------------------------------------------
+
+    /// Poll every PR artifact that is due: at most one `gh` call per PR
+    /// (shared across cards), paced by [`PR_INTERVAL_MS`] and backoff.
+    /// Returns how many `gh` calls it made.
+    pub async fn poll_prs_once(&self, at_ms: u64) -> usize {
+        let prs = self.store.lock().unwrap().pr_artifacts();
+        let urls: Vec<String> = prs.iter().map(|p| p.target.clone()).collect();
+        self.pr.lock().unwrap().retain(&urls);
+        let due = self.pr.lock().unwrap().due(&urls, at_ms);
+        // Polled one at a time on purpose: the loop is the concurrency bound,
+        // and PrPoller's cap only bounds how many are handed out per batch.
+        let mut calls = 0;
+        for url in &due {
+            calls += 1;
+            let outcome = match crate::pr::poll_pr(&self.env, self.gh.as_deref(), url).await {
+                Ok(status) => {
+                    let status_str = status.as_str();
+                    let mut store = self.store.lock().unwrap();
+                    for p in prs.iter().filter(|p| &p.target == url) {
+                        if store
+                            .update_artifact(
+                                &p.card_id,
+                                &p.artifact_id,
+                                Some(status_str),
+                                Some(at_ms),
+                            )
+                            .is_ok()
+                        {
+                            self.notify();
+                        }
+                    }
+                    crate::pr::outcome_for(status)
+                }
+                Err(_) => PollOutcome::Failed,
+            };
+            self.pr.lock().unwrap().record(url, outcome, at_ms);
+        }
+        calls
+    }
 
     /// Fetch a fresh snapshot and fold it into the board.
     pub async fn refresh(&self) -> Result<Snapshot, HerdrError> {
@@ -202,6 +290,9 @@ impl Starfleet {
 
     /// Keep the snapshot current for as long as the app runs.
     pub async fn run_monitor(self: Arc<Self>) {
+        // The Herdr stream never returns while healthy, so the PR poller
+        // gets its own task instead of running once per reconnect.
+        tokio::spawn(self.clone().pr_loop());
         let mut backoff = Duration::from_secs(1);
         loop {
             let started = tokio::time::Instant::now();
@@ -212,6 +303,15 @@ impl Starfleet {
             }
             tokio::time::sleep(backoff).await;
             backoff = (backoff * 2).min(Duration::from_secs(10));
+        }
+    }
+
+    /// The PR poll task: a short tick, with the real cadence per PR.
+    async fn pr_loop(self: Arc<Self>) {
+        let mut tick = tokio::time::interval(PR_TICK);
+        loop {
+            tick.tick().await;
+            let _ = self.poll_prs_once(now_ms()).await;
         }
     }
 
@@ -610,6 +710,52 @@ impl Starfleet {
             .await?;
         Ok(())
     }
+
+    /// The shell command that opens `url` on this host, as a platform match.
+    fn open_url_script(&self, url: &str) -> String {
+        let url = sh_quote(url);
+        if cfg!(windows) {
+            match self.env {
+                HostEnv::Wsl { .. } => format!(
+                    "xdg-open {url} 2>/dev/null || wslview {url} || /mnt/c/Windows/System32/cmd.exe /c start '' {url}"
+                ),
+                HostEnv::Native => format!("powershell.exe -NoProfile -Command Start-Process {url}"),
+            }
+        } else if cfg!(target_os = "macos") {
+            format!("open {url}")
+        } else {
+            format!("xdg-open {url} 2>/dev/null || sensible-browser {url} 2>/dev/null || echo no-opener")
+        }
+    }
+
+    async fn open_url(&self, url: &str) -> Result<()> {
+        let script = self.open_url_script(url);
+        let out = self.env.sh(&script).await?;
+        if !out.ok {
+            bail!("could not open {url}: {}", out.stderr);
+        }
+        Ok(())
+    }
+
+    /// Open (or focus) an artifact: a PR/URL in the browser, a pane in Herdr.
+    /// The store guard is dropped before awaiting — a held MutexGuard across
+    /// an await makes the future non-Send, which a tauri command rejects.
+    pub async fn open_artifact(&self, card_id: &str, artifact_id: &str) -> Result<()> {
+        let found = self.store.lock().unwrap().card(card_id).ok().and_then(|c| {
+            c.artifacts
+                .iter()
+                .find(|a| a.id == artifact_id)
+                .map(|a| (a.kind, a.target.clone()))
+        });
+        let Some((kind, target)) = found else {
+            bail!("that artifact no longer exists");
+        };
+        match kind {
+            ArtifactKind::Pr | ArtifactKind::Url => self.open_url(&target).await,
+            ArtifactKind::Pane => self.focus(&target).await,
+            ArtifactKind::Note => Ok(()),
+        }
+    }
 }
 
 /// Claude Code's status line: a spinner glyph, then a verb that reads
@@ -745,5 +891,17 @@ mod tests {
         }
         let text = "● Added a thing\n  ⎿  Running…\nplain output";
         assert_eq!(without_chrome(text), text);
+    }
+
+    #[test]
+    fn artifact_commands_are_exposed_and_named_as_the_ui_expects() {
+        let sfll = include_str!("../../../src-tauri/src/lib.rs");
+        for cmd in ["poll_prs", "add_artifact", "open_artifact", "read_log"] {
+            assert!(sfll.contains(cmd), "missing tauri command {cmd}");
+        }
+        // The UI calls camelCase argument names; tauri maps them to snake_case.
+        for arg in ["card_id", "artifact_id", "kind", "target", "label"] {
+            assert!(sfll.contains(arg), "missing argument {arg}");
+        }
     }
 }
