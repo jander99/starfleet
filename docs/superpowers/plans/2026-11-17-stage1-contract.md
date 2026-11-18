@@ -43,7 +43,7 @@ Each line gets its test in the task that owns the code.
 - `src/api.ts`, `src/mock.ts`, `src/__tests__/mock.test.ts` — Modify: mirror the additive contract.
 - `docs/superpowers/specs/2026-11-17-starfleet-bridge-design.md` — Modify: §8.2 note on aggregated blocked (Task 4).
 
-**Branch:** `feat/stage1-contract` from `origin/main` (`.worktrees/stage1-contract` per AGENTS.md).
+**Branch:** `feat/stage1-contract` from `origin/docs/bridge-design` (`.worktrees/stage1-contract` per AGENTS.md) — the spec lives only on that branch until PR #25 merges. Rebase onto `main` after the merge.
 
 ---
 
@@ -162,12 +162,14 @@ pub fn project_kind(path: &Path) -> ProjectKind;
 ```
 
 Rules, exactly:
-- `is_git_root && child_repos > 0` → `Meta` (a meta dir that is itself a repo)
 - `is_git_root && parent_is_meta` → `RepoInMeta`
-- `is_git_root` → `Repo`
-- otherwise → `Meta` (a plain directory, empty or not — a path we cannot read is treated as a plain project directory)
+- `is_git_root` → `Repo` — a `.git` at the top always wins: a submodule or vendored repo inside your project does not turn it into a fleet
+- `child_repos > 0 && !is_git_root` → `Meta`
+- otherwise → `Repo` — a plain or unreadable directory is treated as one project, never as a fleet
 
 Definitions: a *git root* is a path where `.git` exists as a directory **or a file** (worktrees and submodules use a file). `child_repos` counts immediate child directories containing `.git`. `parent_is_meta` means the parent has no `.git` and at least two child directories containing `.git`.
+
+**Windows**: cards there carry WSL paths that the Windows process cannot read, so the filesystem answers "nothing" — and the rule above makes that `Repo`, the common case, instead of mislabelling every single-repo card `Meta`. Correctly classifying unreadable paths is an open item.
 
 - [ ] **Step 1: Write the failing pure test**
 
@@ -176,9 +178,11 @@ Definitions: a *git root* is a path where `.git` exists as a directory **or a fi
 fn classify_follows_the_rules() {
     assert_eq!(classify(true, 0, false), ProjectKind::Repo);
     assert_eq!(classify(true, 0, true), ProjectKind::RepoInMeta);
-    assert_eq!(classify(true, 3, false), ProjectKind::Meta);
+    // A repo with vendored repos inside is still one project.
+    assert_eq!(classify(true, 3, false), ProjectKind::Repo);
     assert_eq!(classify(false, 3, false), ProjectKind::Meta);
-    assert_eq!(classify(false, 0, false), ProjectKind::Meta);
+    // A plain or unreadable directory is one project, not a fleet.
+    assert_eq!(classify(false, 0, false), ProjectKind::Repo);
 }
 ```
 
@@ -202,11 +206,11 @@ fn a_fleet_of_repos_is_a_meta_project() {
     }
     assert_eq!(project_kind(dir.path()), ProjectKind::Meta);
     assert_eq!(project_kind(&dir.path().join("svc-a")), ProjectKind::RepoInMeta);
-    // Totality: missing path, and a path that is a file.
-    assert_eq!(project_kind(&dir.path().join("missing")), ProjectKind::Meta);
+    // Totality: missing path and a file are treated as a single project.
+    assert_eq!(project_kind(&dir.path().join("missing")), ProjectKind::Repo);
     let file = dir.path().join("a.txt");
     std::fs::write(&file, "x").unwrap();
-    assert_eq!(project_kind(&file), ProjectKind::Meta);
+    assert_eq!(project_kind(&file), ProjectKind::Repo);
 }
 ```
 
@@ -261,7 +265,7 @@ impl Store {
 fn an_artifact_survives_a_reload() {
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("board.json");
-    let mut store = Store::load(&file).unwrap();
+    let mut store = Store::load(file.clone()).unwrap();
     let card = store.create_card("pr work", "/w", "").unwrap();
     store
         .add_artifact(
@@ -277,7 +281,7 @@ fn an_artifact_survives_a_reload() {
         )
         .unwrap();
     store.update_artifact(&card.id, "a1", Some("ci_running"), Some(42)).unwrap();
-    let reloaded = Store::load(&file).unwrap();
+    let reloaded = Store::load(file).unwrap();
     let a = &reloaded.card(&card.id).unwrap().artifacts[0];
     assert_eq!(a.last_status.as_deref(), Some("ci_running"));
     assert_eq!(a.checked_at, Some(42));
@@ -349,8 +353,8 @@ impl SessionView { pub fn state(&self) -> SessionState }
 ```
 
 Rules, exactly:
-- **Newest** = max by `(created_at, id)` — the id tie-break makes it order-independent (Review Focus 2). The `resumed_from` chain is *not* walked here, so a dangling or cyclic chain cannot loop (Review Focus 4; the chain walk lives in Task 5).
-- **Blocked aggregates**: if the newest is live and blocked, *or any* live session is blocked → `Blocked`. Otherwise the newest decides (Review Focus 3).
+- **Newest** = max by `(created_at, id)` — the id tie-break makes it order-independent (Review Focus 2). The `resumed_from` chain is *not* walked here: a resumed session is a newer link with a later `created_at`, so the chain is for history display only, and a dangling or cyclic chain cannot loop (Review Focus 4; the chain walk lives in Task 5).
+- **Blocked aggregates**: if the newest is live and blocked, *or any* live session is blocked → `Blocked`. Otherwise the newest decides (Review Focus 3). `Paused` is therefore unreachable until something calls `end_session` — this stage ships the contract, not the parking loop.
 - Newest live → map its status: `Blocked → Blocked`, `Working → Working`, `Done → Done`, `Idle | Unknown → Idle`, `Offline → Offline` (never happens for a live session).
 - Newest not live → `end_reason` is `Some(Captain | IdleTimeout)` → `Paused`; `None | Some(Interrupted | Unknown)` → `Interrupted`.
 - No sessions → `Empty`.
@@ -365,9 +369,9 @@ fn ss(id: &str, at: u64, live: bool, status: SessionStatus, reason: Option<EndRe
 
 #[test]
 fn the_newest_session_decides_the_card_state() {
-    let older = ss("l2", 20, false, SessionStatus::Offline, Some(EndReason::Interrupted));
-    let newer_by_chain = ss("l1", 10, true, SessionStatus::Working, None);
-    assert_eq!(card_state(&[older, newer_by_chain]), CardState::Working);
+    let older = ss("l2", 10, false, SessionStatus::Offline, Some(EndReason::Interrupted));
+    let newer = ss("l1", 20, true, SessionStatus::Working, None);
+    assert_eq!(card_state(&[older, newer]), CardState::Working);
 }
 
 #[test]
@@ -413,7 +417,11 @@ One pass over `sessions`: find the newest by `(created_at, id)`, note whether an
 
 - [ ] **Step 4: Wire the views**
 
-`SessionView.state()` builds a `SessionState` from its own fields (`link_id` as id, `created_at`, `live`, `status`, and a new `end_reason: Option<EndReason>` field on `SessionView`). `CardView` gains `state: CardState` (from `card_state` over its sessions) and `kind: ProjectKind` (from `project::project_kind(Path::new(&card.cwd))`). Add `end_reason` to `SessionView` in `session_view()` (`crates/core/src/view.rs:101`) for both the live and offline arms.
+`SessionView.state()` builds a `SessionState` from its own fields (`link_id` as id, `created_at`, `live`, `status`, and a new `end_reason: Option<EndReason>` field on `SessionView`). `CardView` gains `state: CardState` (from `card_state` over its sessions) and `kind: ProjectKind`.
+
+`SessionView` also gains `resumed_from: Option<String>` — mirrored in TS, since the plan's rule is that Rust and TS names match exactly. `cwd` stays the live pane's cwd, but the **offline arm falls back to the link's own `cwd`** (the directory the session was aimed at), so `view.rs:141` becomes `cwd: link.cwd.clone()`.
+
+`project_kind` hits the filesystem, so it must not run per card per poll: build one `HashMap<String, ProjectKind>` at the top of `build()` (`crates/core/src/view.rs:159`) keyed by `card.cwd` and look up per card — at most one `read_dir` per distinct cwd per view build.
 
 - [ ] **Step 5: Run the suite and fix the contract**
 
@@ -501,16 +509,23 @@ fn parking_skips_blocked_and_recent_sessions() {
         }
         store.board.links.push(link);
     }
-    assert_eq!(store.park_candidates(10_000, 3_600_000), vec!["old".to_string()]);
+    // now is past old's idle deadline (0 + 3_600_000) but not fresh's (9_000 + 3_600_000).
+    assert_eq!(store.park_candidates(4_000_000, 3_600_000), vec!["old".to_string()]);
 }
 
 #[test]
 fn ending_a_session_stamps_reason_and_time_and_persists() {
-    // create card, dispatch-free link via store_with(link), then:
-    // store.end_session("l1", EndReason::IdleTimeout).unwrap();
-    // Store::load(file) -> link.end_reason == Some(EndReason::IdleTimeout)
-    //                    -> link.ended_at.is_some()
-    // store.end_session("missing", EndReason::Captain).is_err()
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("board.json");
+    let mut store = Store::load(file.clone()).unwrap();
+    store.board.links.push(SessionLink { id: "l1".into(), ..Default::default() });
+    store.end_session("l1", EndReason::IdleTimeout).unwrap();
+    let reloaded = Store::load(file).unwrap();
+    let link = &reloaded.board.links[0];
+    assert_eq!(link.end_reason, Some(EndReason::IdleTimeout));
+    assert!(link.ended_at.is_some());
+    let mut again = reloaded;
+    assert!(again.end_session("missing", EndReason::Captain).is_err());
 }
 ```
 
@@ -518,7 +533,8 @@ fn ending_a_session_stamps_reason_and_time_and_persists() {
 
 - [ ] **Step 2: Run to see them fail**
 
-Run: `cargo test -p starfleet-core resume_chain parking_skips ending_a_session`
+Run each filter separately — cargo takes one filter before `--`:
+`cargo test -p starfleet-core resume_chain`, then `cargo test -p starfleet-core parking_skips`, then `cargo test -p starfleet-core ending_a_session`.
 Expected: FAIL — functions do not exist.
 
 - [ ] **Step 3: Implement**
@@ -586,6 +602,9 @@ fn the_log_is_append_only_jsonl_and_skips_a_torn_line() {
     let entries = read(&paths, "c1").unwrap();
     assert_eq!(entries.len(), 2);
     assert_eq!(entries[0].text, "waiting on PR #25");
+    // Appending after the torn line must not lose the new entry.
+    append(&paths, "c1", &LogEntry { id: "4".into(), ..e.clone() }).unwrap();
+    assert_eq!(read(&paths, "c1").unwrap().len(), 3);
 }
 ```
 
@@ -597,16 +616,32 @@ Run: `cargo test -p starfleet-core the_log_is_append_only` — Expected: FAIL.
 
 - [ ] **Step 3: Implement**
 
-`append` creates `logs_dir()` if missing, opens the file in append mode, writes one `serde_json::to_string(entry)` line. `read` returns `[]` for a missing file, and skips lines that fail to parse instead of erroring (a torn last line is expected after a crash).
+`append` creates `logs_dir()` if missing, opens the file in append mode, and **writes a leading `\n` when the file exists and does not end in one** — otherwise an entry appended after a crash-torn line would be glued onto it and lost on read. Then it writes one `serde_json::to_string(entry)` line. It rejects a `card_id` containing `/`, `\` or `..` with an error (it becomes a filename). `read` returns `[]` for a missing file, and skips lines that fail to parse instead of erroring (a torn last line is expected after a crash).
 
 - [ ] **Step 4: Add the ownership test**
 
 ```rust
 #[test]
 fn log_entries_keep_their_owner_and_session() {
-    // Append one captain entry and one agent entry with session_id Some("l1"),
-    // read back, assert owners are "captain" and the agent id, and that
-    // the session_id survived — this is the pointer back into the harness transcript.
+    let dir = tempfile::tempdir().unwrap();
+    let paths = Paths::at(dir.path());
+    let captain = LogEntry {
+        id: "1".into(), owner: "captain".into(), at: 1, kind: "note".into(),
+        text: "started the fleet refactor".into(), links: vec![], session_id: None,
+    };
+    let agent = LogEntry {
+        id: "2".into(), owner: "barclay".into(), at: 2, kind: "result".into(),
+        text: "PR opened".into(), links: vec!["https://example.test/pr/1".into()],
+        session_id: Some("l1".into()),
+    };
+    append(&paths, "c1", &captain).unwrap();
+    append(&paths, "c1", &agent).unwrap();
+    let entries = read(&paths, "c1").unwrap();
+    assert_eq!(entries[0].owner, "captain");
+    assert_eq!(entries[1].owner, "barclay");
+    // The session id is the pointer back into the harness's own transcript.
+    assert_eq!(entries[1].session_id.as_deref(), Some("l1"));
+    assert!(append(&paths, "c1/../escape", &captain).is_err());
 }
 ```
 
@@ -672,6 +707,8 @@ export type ProjectKind = "repo" | "meta" | "repo_in_meta";
 // Session gains: resumed_from?: string | null; cwd?: string | null;
 //                end_reason?: EndReason | null;
 // Card gains:   artifacts: Artifact[]; state: CardState; kind: ProjectKind;
+// Station:      agent: string  ->  harness: string   (src/api.ts:73, and every
+//               reader: MapView.tsx, mock.ts's station() builder)
 ```
 
 - [ ] **Step 1: Write the failing Rust test**
@@ -721,3 +758,29 @@ Run: `cargo test --workspace && npm test` → PASS.
 git add crates/core/src/stations.rs crates/core/src/app.rs src/api.ts src/mock.ts src/__tests__/mock.test.ts
 git commit -m "feat: station harness rename (aliased) and mirrored contract in the frontend"
 ```
+
+---
+
+## Additional concern: the no-fallback rule makes Paused too broad
+
+§8.1 says there is **no provider fallback**: if the provider fails or the usage window runs out, the
+session ends. But a pane that closes *because the provider ran out* carries no Starfleet stamp — and
+it looks exactly like a pane you closed yourself, so it reads as **Interrupted**, which routes the
+card into the `stale` tier and asks the Captain to resume it. Resuming a rate-limited agent is the
+wrong nudge: it will fail again.
+
+§8.2's newest-wins rule hides the problem further. A blocked session that dies on a usage limit is
+the newest one, so it goes from `Blocked` straight to `Interrupted`, losing the "it wanted
+something" signal.
+
+What the contract should carry (stage 1, additive):
+
+- `SessionLink.cause_hint: Option<CauseHint>` with `CauseHint { RateLimit, UsageWindow, Outage, Unknown }`.
+  Filled only by the optional heuristic scan of the saved output tail — never used to drive behaviour.
+- The attention sort must show the hint on interrupted cards ("probably a usage limit — resume
+  when the window reopens"), ranked after plain interrupted but before working.
+- A resumed session that fails again with the same hint increments a counter so the UI can say
+  "failed twice on a usage limit" instead of nudge a third time.
+
+None of it changes the card-state enum: interrupted stays interrupted. The hint is the difference
+between "go look at it" and "wait for the window".
