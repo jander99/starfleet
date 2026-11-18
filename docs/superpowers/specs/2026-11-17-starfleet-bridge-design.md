@@ -61,7 +61,7 @@ Session   { id, card_id, agent_id, station_id, cwd, pane_id?, terminal_id?,
             agent_session? {source, agent, kind, value}, resumed_from?,
             prompt, pending_prompt?, last_status, last_seen, output?, output_at?,
             end_reason?, ended_at?, cause_hint? }   end_reason: captain | idle_timeout
-                                                    | turn_complete | interrupted (§8.1)
+                                                    | interrupted (§8.1)
 LogEntry  { id, owner, at, kind, text, links[], session_id? }
 Artifact  { kind, label, target, last_status?, checked_at? }
 ```
@@ -254,8 +254,12 @@ distinction is **who caused the stop**, and Starfleet records its own intent:
 
 | State | Cause | Evidence |
 | --- | --- | --- |
-| **Paused** | The Captain or Starfleet, on purpose | Starfleet stamped `end_reason` when it acted: `captain`, `idle_timeout`, or `turn_complete`. |
+| **Paused** | The Captain or Starfleet, on purpose | Starfleet stamped `end_reason` when it closed the pane: `captain` or `idle_timeout`. |
 | **Interrupted** | Anything else, unplanned | The pane stopped or vanished with no Starfleet stamp. |
+
+A finished turn is **not** an end: the pane stays live and the session is
+`idle` or `done`, resumable in place. `end_reason` is set only when a pane
+actually closes.
 
 Rules:
 
@@ -276,6 +280,21 @@ Rules:
 - **False interrupted**: a pane the Captain closes by hand in Herdr, outside
   Starfleet, carries no stamp and reads as interrupted. The card offers a
   one-click "I closed this" that relabels it `captain`.
+
+### 8.2 Card state is derived
+
+Under option A (§11.1) a card holds many sessions, so its state is computed,
+never stored. **Only the newest session decides** (by `created_at`, following
+the `resumed_from` chain):
+
+- newest session **live** → the card shows its status: `blocked`, `working`,
+  `idle` or `done`;
+- newest session **not live** → `paused` or `interrupted`, from its
+  `end_reason`.
+
+An older interrupted session that was later resumed does not count. The
+attention sort (§7) runs on this derived state: `blocked` first, then
+`interrupted` (the `stale` tier), then `needs decision`, then `working`.
 
 - **Second heuristic** (needs a decision): cache expiry is not observable —
   neither Herdr nor the harness reports it. If we want it, it can only be
