@@ -319,14 +319,14 @@ mod tests {
         let mut p = PrPoller::new(1);
         let mut t = 0;
         for expected in [120_000, 240_000, 480_000, 600_000, 600_000] {
-            assert_eq!(p.due(&[url.clone()], t), vec![url.clone()]);
+            assert_eq!(p.due(std::slice::from_ref(&url), t), vec![url.clone()]);
             p.record(&url, PollOutcome::RateLimited, t);
             let due_at = t + expected;
             assert!(
-                p.due(&[url.clone()], due_at - 1).is_empty(),
+                p.due(std::slice::from_ref(&url), due_at - 1).is_empty(),
                 "not before {expected}"
             );
-            assert_eq!(p.due(&[url.clone()], due_at), vec![url.clone()]);
+            assert_eq!(p.due(std::slice::from_ref(&url), due_at), vec![url.clone()]);
             t = due_at;
         }
     }
@@ -335,10 +335,10 @@ mod tests {
     fn a_merged_pr_is_refreshed_rarely() {
         let url = "https://github.com/o/r/pull/9".to_string();
         let mut q = PrPoller::new(1);
-        assert_eq!(q.due(&[url.clone()], 0), vec![url.clone()]);
+        assert_eq!(q.due(std::slice::from_ref(&url), 0), vec![url.clone()]);
         q.record(&url, PollOutcome::Merged, 0);
-        assert!(q.due(&[url.clone()], 60_000).is_empty());
-        assert_eq!(q.due(&[url.clone()], 600_000).len(), 1);
+        assert!(q.due(std::slice::from_ref(&url), 60_000).is_empty());
+        assert_eq!(q.due(std::slice::from_ref(&url), 600_000).len(), 1);
     }
 
     #[test]
@@ -349,7 +349,7 @@ mod tests {
         p.record(&url, PollOutcome::Ok, 0);
         p.record(&gone, PollOutcome::Ok, 0);
         p.retain(std::slice::from_ref(&url));
-        assert_eq!(p.due(&[gone.clone()], 900_000), vec![gone]);
+        assert_eq!(p.due(std::slice::from_ref(&gone), 900_000), vec![gone]);
     }
 
     #[test]
