@@ -74,6 +74,21 @@ pub resumed_from: Option<String>,
 pub cwd: Option<String>,
 pub end_reason: Option<EndReason>,
 pub ended_at: Option<u64>,
+pub cause_hint: Option<CauseHint>,
+```
+
+`CauseHint` is inert data in stage 1 — nothing reads it:
+
+```rust
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CauseHint {
+    RateLimit,
+    UsageWindow,
+    Outage,
+    #[serde(other)]
+    Unknown,
+}
 ```
 
 - [ ] **Step 1: Write the failing test**
@@ -95,6 +110,19 @@ fn a_board_written_before_the_lifecycle_fields_still_loads() {
     assert_eq!(link.cwd, None);
     assert_eq!(link.end_reason, None);
     assert_eq!(link.ended_at, None);
+    assert_eq!(link.cause_hint, None);
+}
+
+#[test]
+fn a_cause_hint_round_trips_and_an_unknown_value_is_ignored() {
+    assert_eq!(
+        serde_json::from_str::<CauseHint>("\"usage_window\"").unwrap(),
+        CauseHint::UsageWindow
+    );
+    // Deserialized into the field, an unseen variant does not fail the board load.
+    let link: SessionLink =
+        serde_json::from_str(r#"{"id":"l1","cause_hint":"provider_outage"}"#).unwrap();
+    assert_eq!(link.cause_hint, Some(CauseHint::Unknown));
 }
 ```
 
@@ -132,7 +160,11 @@ fn an_end_reason_round_trips_and_unknown_values_fall_back() {
 
 - [ ] **Step 6: Run it, then commit**
 
-Run: `cargo test -p starfleet-core an_end_reason_round_trips` → PASS.
+Run: `cargo test -p starfleet-core an_end_reason_round_trips` and `cargo test -p starfleet-core a_cause_hint_round_trips` → PASS.
+
+Note on the enum fallback: `EndReason` has `#[default] Unknown` *and* `#[serde(other)] Unknown`, which
+serde rejects as a duplicate. Keep `#[serde(other)]` on the variant and drop the `#[default]`, or make
+the field's default explicit — the board-load test above is the check.
 
 ```bash
 git add crates/core/src/store.rs
@@ -430,7 +462,9 @@ Expected: PASS. If `e2e.rs` asserts on the serialized view, extend the expectati
 
 - [ ] **Step 6: Update the spec**
 
-In §8.2 of the design doc, after the bullet list, add: *"Blocked aggregates across live sessions: a permission prompt on an older session is never hidden by a newer working one. Everything else is decided by the newest session."*
+Two edits to §8.2 of the design doc:
+1. Replace "**Only the newest session decides** (by `created_at`, following the `resumed_from` chain)" with "**Only the newest session decides** (by `created_at`, then id). The `resumed_from` chain is history display, not state: a resumed session is a newer link with a later `created_at`, and not walking the chain means a dangling or cyclic chain cannot loop."
+2. After the bullet list, add: *"Blocked aggregates across live sessions: a permission prompt on an older session is never hidden by a newer working one. Everything else is decided by the newest session."*
 
 - [ ] **Step 7: Commit**
 
@@ -594,7 +628,7 @@ fn the_log_is_append_only_jsonl_and_skips_a_torn_line() {
         text: "waiting on PR #25".into(), links: vec![], session_id: None,
     };
     append(&paths, "c1", &e).unwrap();
-    append(&paths, "c1", &LogEntry { id: "2".into(), ..e }).unwrap();
+    append(&paths, "c1", &LogEntry { id: "2".into(), ..e.clone() }).unwrap();
     // A half-written line (crash mid-append) must not break the read.
     let file = paths.log_file("c1");
     let raw = std::fs::read_to_string(&file).unwrap();
@@ -761,26 +795,13 @@ git commit -m "feat: station harness rename (aliased) and mirrored contract in t
 
 ---
 
-## Additional concern: the no-fallback rule makes Paused too broad
+## Deferred to slice two
 
-§8.1 says there is **no provider fallback**: if the provider fails or the usage window runs out, the
-session ends. But a pane that closes *because the provider ran out* carries no Starfleet stamp — and
-it looks exactly like a pane you closed yourself, so it reads as **Interrupted**, which routes the
-card into the `stale` tier and asks the Captain to resume it. Resuming a rate-limited agent is the
-wrong nudge: it will fail again.
-
-§8.2's newest-wins rule hides the problem further. A blocked session that dies on a usage limit is
-the newest one, so it goes from `Blocked` straight to `Interrupted`, losing the "it wanted
-something" signal.
-
-What the contract should carry (stage 1, additive):
-
-- `SessionLink.cause_hint: Option<CauseHint>` with `CauseHint { RateLimit, UsageWindow, Outage, Unknown }`.
-  Filled only by the optional heuristic scan of the saved output tail — never used to drive behaviour.
-- The attention sort must show the hint on interrupted cards ("probably a usage limit — resume
-  when the window reopens"), ranked after plain interrupted but before working.
-- A resumed session that fails again with the same hint increments a counter so the UI can say
-  "failed twice on a usage limit" instead of nudge a third time.
-
-None of it changes the card-state enum: interrupted stays interrupted. The hint is the difference
-between "go look at it" and "wait for the window".
+- **`cause_hint` on interrupted sessions.** A usage-limit or provider-outage death has no Starfleet stamp,
+  so it reads as `interrupted` and invites a resume that will fail again. Stage 1 ships only the inert
+  field, `SessionLink.cause_hint: Option<CauseHint>` with `CauseHint { RateLimit, UsageWindow, Outage }`
+  (present = a hint, absent = none; no `Unknown` variant) and its serde fallback test in Task 1. The
+  output-tail scan that fills it, ranking hinted cards in the attention sort, and the repeat-failure
+  counter all wait for slice two, when `end_session` and parking exist — and because they change
+  behavior, they need a spec change first: §8.1's "never used to drive behavior" would have to be
+  amended before the sort may rank on the hint.

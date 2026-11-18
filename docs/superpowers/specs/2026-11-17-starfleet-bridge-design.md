@@ -273,10 +273,15 @@ Rules:
   once the window reopens. The log entry for the session start carries it.
 - **Interrupted cards sort into the `stale` tier (§7).** The Captain decides:
   resume when capacity returns, or abandon. Neither is automatic.
-- **`cause_hint?` is optional and heuristic**: a scan of the saved output tail
-  for rate-limit or usage-limit text may label `rate_limit`, `usage_window` or
-  `outage`. It is shown as "probably", is never used to drive behavior, and is
-  a guess like the cache-expiry heuristic below.
+- **`cause_hint?` is optional and heuristic (slice two)**: a scan of the saved
+  output tail for rate-limit or usage-limit text may label `rate_limit`,
+  `usage_window` or `outage`. It is shown as "probably", is never used to drive
+  behavior as §8.1 stands, and is a guess like the cache-expiry heuristic below.
+  Stage 1 ships only the inert field. A usage-limit death has no Starfleet
+  stamp, so it reads as interrupted and invites a resume that will fail again;
+  ranking hinted cards in the attention sort, or counting repeat failures to
+  soften the resume nudge, would change behavior and needs this sentence
+  amended first.
 - **False interrupted**: a pane the Captain closes by hand in Herdr, outside
   Starfleet, carries no stamp and reads as interrupted. The card offers a
   one-click "I closed this" that relabels it `captain`.
