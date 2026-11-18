@@ -1,5 +1,6 @@
 //! The desktop shell: a window, and a thin command layer over `starfleet-core`.
 
+use starfleet_core::log::{self, LogEntry};
 use starfleet_core::paths::Paths;
 use starfleet_core::preflight::Check;
 use starfleet_core::stations::Roster;
@@ -130,12 +131,55 @@ async fn focus(core: State<'_, Core>, pane_id: String) -> CmdResult<()> {
     core.get()?.focus(&pane_id).await.map_err(text)
 }
 
+#[tauri::command]
+async fn poll_prs(core: State<'_, Core>) -> CmdResult<usize> {
+    let core = core.get()?;
+    Ok(core.poll_prs_once(starfleet_core::store::now_ms()).await)
+}
+
+#[tauri::command]
+fn add_artifact(
+    core: State<Core>,
+    card_id: String,
+    kind: starfleet_core::store::ArtifactKind,
+    label: String,
+    target: String,
+) -> CmdResult<String> {
+    core.get()?
+        .add_artifact(&card_id, kind, &label, &target)
+        .map_err(text)
+}
+
+#[tauri::command]
+async fn open_artifact(
+    core: State<'_, Core>,
+    card_id: String,
+    artifact_id: String,
+) -> CmdResult<()> {
+    core.get()?
+        .open_artifact(&card_id, &artifact_id)
+        .await
+        .map_err(text)
+}
+
+#[tauri::command]
+fn read_log(core: State<Core>, card_id: String, limit: Option<usize>) -> CmdResult<Vec<LogEntry>> {
+    let core = core.get()?;
+    let mut entries = log::read(core.paths(), &card_id).map_err(text)?;
+    if let Some(limit) = limit {
+        let keep = entries.len().saturating_sub(limit);
+        entries.drain(..keep);
+    }
+    Ok(entries)
+}
+
 fn start_core() -> Result<Arc<Starfleet>, String> {
     let paths = Paths::resolve().map_err(text)?;
     Starfleet::new(Options {
         paths,
         endpoint: None,
         env: None,
+        gh: None,
     })
     .map_err(text)
 }
@@ -172,7 +216,11 @@ pub fn run() {
             reply_keys,
             tail,
             saved_output,
-            focus
+            focus,
+            poll_prs,
+            add_artifact,
+            open_artifact,
+            read_log
         ])
         .run(tauri::generate_context!())
         .expect("failed to start the Starfleet window");

@@ -5,7 +5,6 @@ use crate::env::{sh_quote, HostEnv};
 use anyhow::Result;
 use serde_json::Value;
 use std::collections::BTreeMap;
-use std::time::Duration;
 
 /// The last poll's answer for a PR, as the spec's §8 vocabulary.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -310,7 +309,7 @@ mod tests {
         );
 
         // The cap bounds one batch.
-        let mut capped = PrPoller::new(1);
+        let capped = PrPoller::new(1);
         assert_eq!(capped.due(&[url.clone(), other.clone()], 0).len(), 1);
     }
 

@@ -4,6 +4,7 @@ use mock_herdr::MockHerdr;
 use starfleet_core::env::HostEnv;
 use starfleet_core::herdr::Endpoint;
 use starfleet_core::paths::Paths;
+use starfleet_core::store::{now_ms, ArtifactKind};
 use starfleet_core::view::{BoardView, CardState, SessionStatus};
 use starfleet_core::{DispatchRequest, Options, Starfleet};
 use std::sync::Arc;
@@ -35,6 +36,7 @@ impl Rig {
             paths: Paths::at(&self.root.join("starfleet")),
             endpoint: Some(endpoint),
             env: Some(HostEnv::Native),
+            gh: None,
         })
         .unwrap();
         tokio::spawn(app.clone().run_monitor());
@@ -376,6 +378,7 @@ async fn herdr_going_away_is_shown_as_disconnected() {
         paths: Paths::at(&dir.path().join("starfleet")),
         endpoint: Some(Endpoint::Unix(dir.path().join("nothing-here.sock"))),
         env: Some(HostEnv::Native),
+        gh: None,
     })
     .unwrap();
     tokio::spawn(app.clone().run_monitor());
@@ -488,4 +491,94 @@ async fn an_agent_that_blocks_mid_task_refuses_follow_ups() {
     until(&app, "unblocked", |v| v.counts.blocked == 0).await;
     app.follow_up(&result.pane_id, "carry on").await.unwrap();
     assert_eq!(rig.mock.prompts_received(&result.pane_id).len(), 2);
+}
+// A fake gh on PATH: answers by URL, and records every call.
+fn fake_gh(root: &std::path::Path) -> std::path::PathBuf {
+    let bin = root.join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let log = root.join("gh-calls.log");
+    let gh = bin.join("gh");
+    std::fs::write(
+        &gh,
+        format!(
+            "#!/bin/sh\necho \"$@\" >> {log}\ncase \"$3\" in\n\
+             7) echo '{{\"state\":\"OPEN\",\"checks\":{{\"state\":\"SUCCESS\"}}}}' ;;\n\
+             8) echo '{{\"state\":\"OPEN\",\"checks\":{{\"state\":\"PENDING\"}}}}' ;;\n\
+             *) echo 'no such PR' >&2; exit 1 ;;\nesac\n",
+            log = log.display()
+        ),
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&gh, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    gh
+}
+
+#[tokio::test]
+async fn pr_artifacts_are_polled_through_gh_and_shown_on_the_card() {
+    let rig = rig().await;
+    let _gh = fake_gh(&rig.root);
+    let app = rig.app();
+    // Put the fake gh first on PATH for this app's shell calls.
+    std::env::set_var(
+        "PATH",
+        format!(
+            "{}:{}",
+            rig.root.join("bin").display(),
+            std::env::var("PATH").unwrap()
+        ),
+    );
+    let card = app
+        .create_card("PR work", &rig.workdir("repo2"), "")
+        .await
+        .unwrap();
+    let id = app
+        .add_artifact(
+            &card,
+            ArtifactKind::Pr,
+            "PR #7",
+            "https://github.com/o/r/pull/7",
+        )
+        .unwrap();
+    assert!(!id.is_empty());
+    let id8 = app
+        .add_artifact(
+            &card,
+            ArtifactKind::Pr,
+            "PR #8",
+            "https://github.com/o/r/pull/8",
+        )
+        .unwrap();
+    assert_ne!(id, id8);
+
+    // Poll twice with the fake gh: pull/7 passes, pull/8 is still running.
+    let calls = app.poll_prs_once(now_ms()).await;
+    assert_eq!(calls, 2, "one gh call per PR");
+    let v = app.view();
+    let status = |aid: &str| {
+        v.cards[0]
+            .card
+            .artifacts
+            .iter()
+            .find(|a| a.id == aid)
+            .and_then(|a| a.last_status.clone())
+    };
+    assert_eq!(status(&id).as_deref(), Some("ci_passed"));
+    assert_eq!(status(&id8).as_deref(), Some("ci_running"));
+    assert!(v.cards[0]
+        .card
+        .artifacts
+        .iter()
+        .all(|a| a.checked_at.is_some()));
+
+    // Not due again inside the interval; due after it.
+    assert_eq!(app.poll_prs_once(now_ms()).await, 0);
+    assert_eq!(app.poll_prs_once(now_ms() + 60_000).await, 2);
+    let log = std::fs::read_to_string(rig.root.join("gh-calls.log")).unwrap();
+    // The monitor's own poll loop shares the poller, so this is a floor.
+    assert!(log.lines().count() >= 4, "gh: {log}");
+    assert!(log.contains("pr view 7 -R o/r"));
 }
