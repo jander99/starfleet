@@ -38,9 +38,11 @@ function CardPanel(props: {
     <article className={`card${card.done ? " is-done" : ""}`}>
       <header>
         <div className="card-title">
-          <button className="ghost card-name" onClick={() => props.onConsole(card)}>
-            <h3>{card.title}</h3>
-          </button>
+          <h3>
+            <button className="ghost card-name" onClick={() => props.onConsole(card)}>
+              {card.title}
+            </button>
+          </h3>
           <CardStatePill state={card.state} />
           <code className="ellipsis" title={card.cwd}>
             {card.cwd}

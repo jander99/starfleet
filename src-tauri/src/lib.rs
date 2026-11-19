@@ -182,12 +182,20 @@ fn append_log(
     session_id: Option<String>,
 ) -> CmdResult<LogEntry> {
     let core = core.get()?;
+    let text = text.trim().to_string();
+    if text.is_empty() {
+        return Err("write something first".into());
+    }
+    let kind = kind.unwrap_or_else(|| "note".into());
+    if !matches!(kind.as_str(), "note" | "decision") {
+        return Err(format!("not a log entry kind: {kind}"));
+    }
     let at = starfleet_core::store::now_ms();
     let entry = LogEntry {
         id: starfleet_core::store::short_id(),
         owner: "captain".into(),
         at,
-        kind: kind.unwrap_or_else(|| "note".into()),
+        kind,
         text,
         links: Vec::new(),
         session_id,

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { backend, errorText, type Card, type LogEntry } from "../api";
 import { rounds } from "../log";
 import { ErrorNote, timeAgo } from "../ui";
@@ -32,14 +32,31 @@ export function CardConsole({ card, onClose }: { card: Card; onClose: () => void
   const [error, setError] = useState<string | null>(null);
   const [showAll, setShowAll] = useState(false);
 
-  const load = () => backend.readLog(card.id).then(setEntries, (e) => setError(errorText(e)));
+  const [busy, setBusy] = useState(false);
+  // Only the newest read may write `entries`: a slow earlier read must not
+  // overwrite a newer one, and nothing writes after unmount.
+  const reads = useRef(0);
+  const load = () => {
+    const mine = ++reads.current;
+    return backend.readLog(card.id).then(
+      (e) => mine === reads.current && setEntries(e),
+      (e) => mine === reads.current && setError(errorText(e)),
+    );
+  };
   useEffect(() => {
-    backend.readLog(card.id).then(setEntries, (e) => setError(errorText(e)));
+    load();
+    return () => {
+      reads.current++;
+    };
   }, [card.id]);
 
   const add = () => {
-    if (!text.trim()) return;
-    backend.appendLog(card.id, text).then(() => (setText(""), load()), (e) => setError(errorText(e)));
+    if (busy || !text.trim()) return;
+    setBusy(true);
+    backend
+      .appendLog(card.id, text)
+      .then(() => (setText(""), setError(null), load()), (e) => setError(errorText(e)))
+      .finally(() => setBusy(false));
   };
 
   const all = entries ?? [];
@@ -80,7 +97,7 @@ export function CardConsole({ card, onClose }: { card: Card; onClose: () => void
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && (e.metaKey || e.ctrlKey) && add()}
         />
-        <button onClick={add} disabled={!text.trim()}>
+        <button onClick={add} disabled={busy || !text.trim()}>
           Log it
         </button>
       </footer>

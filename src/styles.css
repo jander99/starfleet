@@ -383,6 +383,8 @@ main {
 .card-name {
   padding: 0;
   text-align: left;
+  font: inherit;
+  color: inherit;
 }
 .dot {
   width: 8px;
