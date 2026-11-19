@@ -198,7 +198,10 @@ mod tests {
     fn resolve_prefers_an_explicit_socket() {
         let _g = env_guard();
         clear_env();
-        let settings = Settings { herdr_socket: Some("/run/herdr.sock".into()), ..Default::default() };
+        let settings = Settings {
+            herdr_socket: Some("/run/herdr.sock".into()),
+            ..Default::default()
+        };
         let e = Endpoint::resolve(&settings, &HostEnv::Native);
         assert_eq!(e.describe(), "/run/herdr.sock");
         clear_env();
@@ -229,9 +232,15 @@ mod tests {
         let _g = env_guard();
         clear_env();
         std::env::set_var("HOME", "/home/me");
-        let settings = Settings { herdr_session: Some("work-1".into()), ..Default::default() };
+        let settings = Settings {
+            herdr_session: Some("work-1".into()),
+            ..Default::default()
+        };
         let e = Endpoint::resolve(&settings, &HostEnv::Native);
-        assert_eq!(e.describe(), "/home/me/.config/herdr/sessions/work-1/herdr.sock");
+        assert_eq!(
+            e.describe(),
+            "/home/me/.config/herdr/sessions/work-1/herdr.sock"
+        );
         clear_env();
     }
 
@@ -242,7 +251,10 @@ mod tests {
         std::env::set_var("HOME", "/home/me");
         std::env::set_var("HERDR_SESSION", "from-env");
         let e = Endpoint::resolve(&Settings::default(), &HostEnv::Native);
-        assert_eq!(e.describe(), "/home/me/.config/herdr/sessions/from-env/herdr.sock");
+        assert_eq!(
+            e.describe(),
+            "/home/me/.config/herdr/sessions/from-env/herdr.sock"
+        );
         clear_env();
     }
 
@@ -251,7 +263,10 @@ mod tests {
         let _g = env_guard();
         clear_env();
         std::env::set_var("HOME", "/home/me");
-        let settings = Settings { herdr_session: Some("../escape".into()), ..Default::default() };
+        let settings = Settings {
+            herdr_session: Some("../escape".into()),
+            ..Default::default()
+        };
         let e = Endpoint::resolve(&settings, &HostEnv::Native);
         assert_eq!(e.describe(), "/home/me/.config/herdr/herdr.sock");
         clear_env();
@@ -262,7 +277,10 @@ mod tests {
         let _g = env_guard();
         clear_env();
         std::env::set_var("HOME", "/home/me");
-        let settings = Settings { herdr_session: Some("".into()), ..Default::default() };
+        let settings = Settings {
+            herdr_session: Some("".into()),
+            ..Default::default()
+        };
         let e = Endpoint::resolve(&settings, &HostEnv::Native);
         assert_eq!(e.describe(), "/home/me/.config/herdr/herdr.sock");
         clear_env();
@@ -275,22 +293,40 @@ mod tests {
         let env = HostEnv::Wsl { distro: None };
 
         let e = Endpoint::resolve(&Settings::default(), &env);
-        assert_eq!(e.describe(), format!("{DEFAULT_SOCKET_EXPR} via {}", env.label()));
+        assert_eq!(
+            e.describe(),
+            format!("{DEFAULT_SOCKET_EXPR} via {}", env.label())
+        );
 
-        let settings = Settings { herdr_session: Some("s1".into()), ..Default::default() };
+        let settings = Settings {
+            herdr_session: Some("s1".into()),
+            ..Default::default()
+        };
         let e = Endpoint::resolve(&settings, &env);
         assert!(matches!(e, Endpoint::Relay { .. }));
         assert!(e.describe().contains("/sessions/s1/herdr.sock"));
 
-        let settings = Settings { herdr_socket: Some("/wsl/sock".into()), ..Default::default() };
+        let settings = Settings {
+            herdr_socket: Some("/wsl/sock".into()),
+            ..Default::default()
+        };
         let e = Endpoint::resolve(&settings, &env);
         // The explicit socket is shell-quoted for the relay.
-        assert_eq!(e.describe(), "'/wsl/sock' via windows + wsl (default distribution)");
+        assert_eq!(
+            e.describe(),
+            "'/wsl/sock' via windows + wsl (default distribution)"
+        );
 
         // An empty explicit socket falls back to the default expression.
-        let settings = Settings { herdr_socket: Some("".into()), ..Default::default() };
+        let settings = Settings {
+            herdr_socket: Some("".into()),
+            ..Default::default()
+        };
         let e = Endpoint::resolve(&settings, &env);
-        assert_eq!(e.describe(), format!("{DEFAULT_SOCKET_EXPR} via {}", env.label()));
+        assert_eq!(
+            e.describe(),
+            format!("{DEFAULT_SOCKET_EXPR} via {}", env.label())
+        );
     }
 
     #[cfg(unix)]

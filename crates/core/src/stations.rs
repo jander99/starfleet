@@ -111,31 +111,31 @@ mod tests {
     }
 }
 
-    #[test]
-    fn a_bad_roster_file_is_an_error_and_an_unreadable_one_too() {
-        let dir = tempfile::tempdir().unwrap();
-        let paths = Paths::at(dir.path());
-        std::fs::create_dir_all(&paths.config_dir).unwrap();
+#[test]
+fn a_bad_roster_file_is_an_error_and_an_unreadable_one_too() {
+    let dir = tempfile::tempdir().unwrap();
+    let paths = Paths::at(dir.path());
+    std::fs::create_dir_all(&paths.config_dir).unwrap();
 
-        std::fs::write(paths.roster_file(), "{ nope").unwrap();
-        let err = Roster::load_or_seed(&paths).unwrap_err().to_string();
-        assert!(err.contains("is not a valid roster"), "{err}");
+    std::fs::write(paths.roster_file(), "{ nope").unwrap();
+    let err = Roster::load_or_seed(&paths).unwrap_err().to_string();
+    assert!(err.contains("is not a valid roster"), "{err}");
 
-        // A directory where the file should be is not "not found", so it fails.
-        std::fs::remove_file(paths.roster_file()).unwrap();
-        std::fs::create_dir(paths.roster_file()).unwrap();
-        let err = Roster::load_or_seed(&paths).unwrap_err().to_string();
-        assert!(err.contains("cannot read"), "{err}");
-    }
+    // A directory where the file should be is not "not found", so it fails.
+    std::fs::remove_file(paths.roster_file()).unwrap();
+    std::fs::create_dir(paths.roster_file()).unwrap();
+    let err = Roster::load_or_seed(&paths).unwrap_err().to_string();
+    assert!(err.contains("cannot read"), "{err}");
+}
 
-    #[test]
-    fn a_missing_roster_is_seeded_from_the_builtin() {
-        let dir = tempfile::tempdir().unwrap();
-        let paths = Paths::at(dir.path());
-        let seeded = Roster::load_or_seed(&paths).unwrap();
-        assert!(paths.roster_file().exists());
-        assert_eq!(seeded.locations.len(), Roster::builtin().locations.len());
-        // The written file reads back identically.
-        let again = Roster::load_or_seed(&paths).unwrap();
-        assert_eq!(again.locations.len(), seeded.locations.len());
-    }
+#[test]
+fn a_missing_roster_is_seeded_from_the_builtin() {
+    let dir = tempfile::tempdir().unwrap();
+    let paths = Paths::at(dir.path());
+    let seeded = Roster::load_or_seed(&paths).unwrap();
+    assert!(paths.roster_file().exists());
+    assert_eq!(seeded.locations.len(), Roster::builtin().locations.len());
+    // The written file reads back identically.
+    let again = Roster::load_or_seed(&paths).unwrap();
+    assert_eq!(again.locations.len(), seeded.locations.len());
+}

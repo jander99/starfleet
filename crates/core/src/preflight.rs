@@ -372,8 +372,17 @@ mod tests {
         assert_eq!(server.status, CheckStatus::Fail);
         assert!(server.fix.is_some());
         // Every tool check is present, with a fix when it fails.
-        for id in ["tool.herdr", "tool.claude", "tool.opencode", "claude_mem", "tool.gh"] {
-            let c = checks.iter().find(|c| c.id == id).unwrap_or_else(|| panic!("missing {id}"));
+        for id in [
+            "tool.herdr",
+            "tool.claude",
+            "tool.opencode",
+            "claude_mem",
+            "tool.gh",
+        ] {
+            let c = checks
+                .iter()
+                .find(|c| c.id == id)
+                .unwrap_or_else(|| panic!("missing {id}"));
             if c.status != CheckStatus::Ok {
                 assert!(c.fix.is_some(), "{id} has no fix");
             }
@@ -395,12 +404,21 @@ mod tests {
         assert!(checks.iter().any(|c| c.id == "integration.claude"));
         assert!(checks.iter().any(|c| c.id == "integration.opencode"));
         // The mock reports opencode as not installed.
-        let oc = checks.iter().find(|c| c.id == "integration.opencode").unwrap();
+        let oc = checks
+            .iter()
+            .find(|c| c.id == "integration.opencode")
+            .unwrap();
         assert_eq!(oc.status, CheckStatus::Warn);
-        assert_eq!(oc.detail, "not installed; Herdr falls back to reading the screen");
+        assert_eq!(
+            oc.detail,
+            "not installed; Herdr falls back to reading the screen"
+        );
         assert!(oc.fix.is_some());
         // And claude as current.
-        let cl = checks.iter().find(|c| c.id == "integration.claude").unwrap();
+        let cl = checks
+            .iter()
+            .find(|c| c.id == "integration.claude")
+            .unwrap();
         assert_eq!(cl.status, CheckStatus::Ok);
         drop(mock);
     }
@@ -448,10 +466,24 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn a_missing_optional_tool_only_warns() {
-        let c = tool_check(&HostEnv::Native, "no-such-tool-xyz", "Missing", false, "fix it").await;
+        let c = tool_check(
+            &HostEnv::Native,
+            "no-such-tool-xyz",
+            "Missing",
+            false,
+            "fix it",
+        )
+        .await;
         assert_eq!(c.status, CheckStatus::Warn);
         assert_eq!(c.fix.as_deref(), Some("fix it"));
-        let c = tool_check(&HostEnv::Native, "no-such-tool-xyz", "Missing", true, "fix it").await;
+        let c = tool_check(
+            &HostEnv::Native,
+            "no-such-tool-xyz",
+            "Missing",
+            true,
+            "fix it",
+        )
+        .await;
         assert_eq!(c.status, CheckStatus::Fail);
     }
 
@@ -464,7 +496,9 @@ mod tests {
             let (mut stream, _) = listener.accept().await.unwrap();
             let mut buf = [0u8; 256];
             let _ = stream.read(&mut buf).await;
-            let _ = stream.write_all(format!("HTTP/1.0 {status_line}\r\n\r\n").as_bytes()).await;
+            let _ = stream
+                .write_all(format!("HTTP/1.0 {status_line}\r\n\r\n").as_bytes())
+                .await;
         });
         port
     }
@@ -554,7 +588,11 @@ mod tests {
         assert_eq!(checks[0].id, "environment");
         if checks[0].status == CheckStatus::Fail {
             assert_eq!(checks.len(), 1, "nothing else can be checked without WSL");
-            assert!(checks[0].detail.contains("WSL is not reachable"), "{}", checks[0].detail);
+            assert!(
+                checks[0].detail.contains("WSL is not reachable"),
+                "{}",
+                checks[0].detail
+            );
         } else {
             assert!(checks.len() > 1);
         }

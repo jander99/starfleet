@@ -275,8 +275,16 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let paths = Paths::at(dir.path());
         std::fs::create_dir_all(&paths.config_dir).unwrap();
-        let core = Starfleet::new(Options { paths, endpoint: None, env: None, gh: None }).unwrap();
-        let app = tauri::test::mock_builder().build(tauri::generate_context!()).unwrap();
+        let core = Starfleet::new(Options {
+            paths,
+            endpoint: None,
+            env: None,
+            gh: None,
+        })
+        .unwrap();
+        let app = tauri::test::mock_builder()
+            .build(tauri::generate_context!())
+            .unwrap();
         app.manage(Core(Ok(core)));
         (app, dir)
     }
@@ -308,32 +316,57 @@ mod tests {
 
     #[test]
     fn a_core_that_failed_to_start_reports_its_reason() {
-        let app = tauri::test::mock_builder().build(tauri::generate_context!()).unwrap();
+        let app = tauri::test::mock_builder()
+            .build(tauri::generate_context!())
+            .unwrap();
         app.manage(Core(Err("bad roster".into())));
         assert_eq!(board_view(app.state()).unwrap_err(), "bad roster");
-        assert_eq!(delete_card(app.state(), "c1".into()).unwrap_err(), "bad roster");
+        assert_eq!(
+            delete_card(app.state(), "c1".into()).unwrap_err(),
+            "bad roster"
+        );
     }
 
     #[tokio::test]
     async fn card_lifecycle_commands_work() {
         let (app, _dir) = app();
         // Use a scratch folder for the card so no real path is touched.
-        let id = create_card(app.state(), "T".into(), "/tmp".into(), "n".into()).await.unwrap();
-        update_card(app.state(), id.clone(), Some("T2".into()), None, Some("more".into()), Some(true))
+        let id = create_card(app.state(), "T".into(), "/tmp".into(), "n".into())
             .await
             .unwrap();
-        let card = board_view(app.state()).unwrap().cards.into_iter().find(|c| c.card.id == id).unwrap();
+        update_card(
+            app.state(),
+            id.clone(),
+            Some("T2".into()),
+            None,
+            Some("more".into()),
+            Some(true),
+        )
+        .await
+        .unwrap();
+        let card = board_view(app.state())
+            .unwrap()
+            .cards
+            .into_iter()
+            .find(|c| c.card.id == id)
+            .unwrap();
         assert_eq!(card.card.title, "T2");
         assert_eq!(card.card.notes, "more");
         assert!(card.card.done);
         delete_card(app.state(), id.clone()).unwrap();
-        assert!(board_view(app.state()).unwrap().cards.iter().all(|c| c.card.id != id));
+        assert!(board_view(app.state())
+            .unwrap()
+            .cards
+            .iter()
+            .all(|c| c.card.id != id));
     }
 
     #[tokio::test]
     async fn create_card_rejects_a_bad_folder() {
         let (app, _dir) = app();
-        let err = create_card(app.state(), "T".into(), "".into(), "".into()).await.unwrap_err();
+        let err = create_card(app.state(), "T".into(), "".into(), "".into())
+            .await
+            .unwrap_err();
         assert!(!err.is_empty());
     }
 
@@ -341,8 +374,14 @@ mod tests {
     fn artifacts_and_links_round_trip() {
         let (app, _dir) = app();
         let id = a_card(&app);
-        let a = add_artifact(app.state(), id.clone(), starfleet_core::store::ArtifactKind::Url, "Docs".into(), "https://x".into())
-            .unwrap();
+        let a = add_artifact(
+            app.state(),
+            id.clone(),
+            starfleet_core::store::ArtifactKind::Url,
+            "Docs".into(),
+            "https://x".into(),
+        )
+        .unwrap();
         assert!(!a.is_empty());
         // Detaching an unknown link is a no-op, not a panic.
         assert!(detach(app.state(), "nope".into()).is_ok());
@@ -368,12 +407,29 @@ mod tests {
     fn append_log_validates_its_input() {
         let (app, _dir) = app();
         let id = a_card(&app);
-        assert_eq!(append_log(app.state(), id.clone(), "   ".into(), None, None).unwrap_err(), "write something first");
         assert_eq!(
-            append_log(app.state(), id.clone(), "x".into(), Some("prompt".into()), None).unwrap_err(),
+            append_log(app.state(), id.clone(), "   ".into(), None, None).unwrap_err(),
+            "write something first"
+        );
+        assert_eq!(
+            append_log(
+                app.state(),
+                id.clone(),
+                "x".into(),
+                Some("prompt".into()),
+                None
+            )
+            .unwrap_err(),
             "not a log entry kind: prompt"
         );
-        let e = append_log(app.state(), id, "kept".into(), Some("decision".into()), Some("l1".into())).unwrap();
+        let e = append_log(
+            app.state(),
+            id,
+            "kept".into(),
+            Some("decision".into()),
+            Some("l1".into()),
+        )
+        .unwrap();
         assert_eq!(e.owner, "captain");
         assert_eq!(e.kind, "decision");
         assert_eq!(e.session_id.as_deref(), Some("l1"));
@@ -411,7 +467,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let old = std::env::var("STARFLEET_HOME").ok();
         std::env::set_var("STARFLEET_HOME", dir.path());
-        let app = tauri::test::mock_builder().build(tauri::generate_context!()).unwrap();
+        let app = tauri::test::mock_builder()
+            .build(tauri::generate_context!())
+            .unwrap();
         let core = boot(app.handle());
         match old {
             Some(v) => std::env::set_var("STARFLEET_HOME", v),
@@ -466,13 +524,27 @@ mod tests {
         let _ = preflight(app.state()).await;
         assert!(tail(app.state(), "p1".into(), 10).await.is_err());
         assert!(focus(app.state(), "p1".into()).await.is_err());
-        assert!(follow_up(app.state(), "p1".into(), "hi".into()).await.is_err());
-        assert!(reply_keys(app.state(), "p1".into(), None, vec!["enter".into()]).await.is_err());
+        assert!(follow_up(app.state(), "p1".into(), "hi".into())
+            .await
+            .is_err());
+        assert!(
+            reply_keys(app.state(), "p1".into(), None, vec!["enter".into()])
+                .await
+                .is_err()
+        );
         assert!(send_pending(app.state(), "l1".into()).await.is_err());
         assert!(saved_output(app.state(), "l1".into()).is_err());
         let _ = poll_prs(app.state()).await;
-        let req = DispatchRequest { card_id: "c".into(), station_id: "s".into(), prompt: "p".into(), agent: None, model: None };
+        let req = DispatchRequest {
+            card_id: "c".into(),
+            station_id: "s".into(),
+            prompt: "p".into(),
+            agent: None,
+            model: None,
+        };
         assert!(dispatch(app.state(), req).await.is_err());
-        assert!(open_artifact(app.state(), "c".into(), "a".into()).await.is_err());
+        assert!(open_artifact(app.state(), "c".into(), "a".into())
+            .await
+            .is_err());
     }
 }

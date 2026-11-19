@@ -124,7 +124,12 @@ mod tests {
     fn detect_follows_the_platform() {
         let env = HostEnv::detect(Some("Ubuntu".into()));
         if cfg!(windows) {
-            assert_eq!(env, HostEnv::Wsl { distro: Some("Ubuntu".into()) });
+            assert_eq!(
+                env,
+                HostEnv::Wsl {
+                    distro: Some("Ubuntu".into())
+                }
+            );
         } else {
             assert_eq!(env, HostEnv::Native);
         }
@@ -134,7 +139,10 @@ mod tests {
     fn label_names_each_environment() {
         assert_eq!(HostEnv::Native.label(), std::env::consts::OS);
         assert_eq!(
-            HostEnv::Wsl { distro: Some("Ubuntu".into()) }.label(),
+            HostEnv::Wsl {
+                distro: Some("Ubuntu".into())
+            }
+            .label(),
             "windows + wsl (Ubuntu)"
         );
         assert_eq!(
@@ -157,7 +165,10 @@ mod tests {
         assert_eq!(args, ["-c", "echo hi"]);
 
         // WSL with a distro: wsl.exe -d <distro> -e sh -c <script>.
-        let mut cmd = HostEnv::Wsl { distro: Some("Ubuntu".into()) }.command("echo hi");
+        let mut cmd = HostEnv::Wsl {
+            distro: Some("Ubuntu".into()),
+        }
+        .command("echo hi");
         let prog = cmd.as_std().get_program().to_string_lossy().to_string();
         let args: Vec<String> = cmd
             .as_std()

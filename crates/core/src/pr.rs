@@ -361,111 +361,142 @@ mod tests {
     }
 }
 
-    #[tokio::test]
-    async fn fetch_pr_reports_gh_failures() {
-        use crate::env::HostEnv;
-        #[cfg(unix)]
-        {
-            // A failing gh: stderr is preferred as the message.
-            let err = fetch_pr(&HostEnv::Native, Some("sh -c 'echo boom >&2; exit 1'"), ("o", "r", 1))
-                .await
-                .unwrap_err()
-                .to_string();
-            assert!(err.contains("boom"), "{err}");
+#[tokio::test]
+async fn fetch_pr_reports_gh_failures() {
+    use crate::env::HostEnv;
+    #[cfg(unix)]
+    {
+        // A failing gh: stderr is preferred as the message.
+        let err = fetch_pr(
+            &HostEnv::Native,
+            Some("sh -c 'echo boom >&2; exit 1'"),
+            ("o", "r", 1),
+        )
+        .await
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("boom"), "{err}");
 
-            // An empty-output gh is its own message.
-            let err = fetch_pr(&HostEnv::Native, Some("true"), ("o", "r", 7))
-                .await
-                .unwrap_err()
-                .to_string();
-            assert!(err.contains("o/r#7"), "{err}");
+        // An empty-output gh is its own message.
+        let err = fetch_pr(&HostEnv::Native, Some("true"), ("o", "r", 7))
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("o/r#7"), "{err}");
 
-            // Valid JSON parses through. `bin` is one shell word, so a
-            // multi-word command needs a script on PATH.
-            use std::os::unix::fs::PermissionsExt;
-            let dir = tempfile::tempdir().unwrap();
-            let bin = dir.path().join("fake-gh");
-            std::fs::write(&bin, "#!/bin/sh\necho '{\"state\":\"OPEN\"}'\n").unwrap();
-            std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
-            let v = fetch_pr(&HostEnv::Native, Some(&bin.display().to_string()), ("o", "r", 2))
-                .await
-                .unwrap();
-            assert_eq!(v["state"], "OPEN");
+        // Valid JSON parses through. `bin` is one shell word, so a
+        // multi-word command needs a script on PATH.
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let bin = dir.path().join("fake-gh");
+        std::fs::write(&bin, "#!/bin/sh\necho '{\"state\":\"OPEN\"}'\n").unwrap();
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let v = fetch_pr(
+            &HostEnv::Native,
+            Some(&bin.display().to_string()),
+            ("o", "r", 2),
+        )
+        .await
+        .unwrap();
+        assert_eq!(v["state"], "OPEN");
 
-            // Non-JSON output is reported, not panicked on.
-            std::fs::write(&bin, "#!/bin/sh\necho not-json\n").unwrap();
-            let err = fetch_pr(&HostEnv::Native, Some(&bin.display().to_string()), ("o", "r", 3))
-                .await
-                .unwrap_err()
-                .to_string();
-            assert!(err.contains("did not parse"), "{err}");
-        }
+        // Non-JSON output is reported, not panicked on.
+        std::fs::write(&bin, "#!/bin/sh\necho not-json\n").unwrap();
+        let err = fetch_pr(
+            &HostEnv::Native,
+            Some(&bin.display().to_string()),
+            ("o", "r", 3),
+        )
+        .await
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("did not parse"), "{err}");
     }
+}
 
-    #[test]
-    fn parse_pr_url_only_takes_pull_links() {
-        assert_eq!(
-            parse_pr_url("https://github.com/o/r/pull/12"),
-            Some(("o".into(), "r".into(), 12))
-        );
-        assert_eq!(
-            parse_pr_url("https://github.com/o/r.git/pull/3"),
-            Some(("o".into(), "r".into(), 3))
-        );
-        assert_eq!(parse_pr_url("https://github.com/o/r/issues/12"), None);
-        assert_eq!(parse_pr_url("https://gitlab.com/o/r/pull/12"), None);
-        assert_eq!(parse_pr_url("https://github.com/o/r/pull/x"), None);
-        assert_eq!(parse_pr_url("https://github.com//r/pull/1"), None);
-        assert_eq!(parse_pr_url("https://github.com/o"), None);
-    }
+#[test]
+fn parse_pr_url_only_takes_pull_links() {
+    assert_eq!(
+        parse_pr_url("https://github.com/o/r/pull/12"),
+        Some(("o".into(), "r".into(), 12))
+    );
+    assert_eq!(
+        parse_pr_url("https://github.com/o/r.git/pull/3"),
+        Some(("o".into(), "r".into(), 3))
+    );
+    assert_eq!(parse_pr_url("https://github.com/o/r/issues/12"), None);
+    assert_eq!(parse_pr_url("https://gitlab.com/o/r/pull/12"), None);
+    assert_eq!(parse_pr_url("https://github.com/o/r/pull/x"), None);
+    assert_eq!(parse_pr_url("https://github.com//r/pull/1"), None);
+    assert_eq!(parse_pr_url("https://github.com/o"), None);
+}
 
-    #[test]
-    fn status_from_gh_reads_state_draft_and_checks() {
-        use serde_json::json;
-        assert_eq!(status_from_gh(&json!({"state":"MERGED"})), PrStatus::Merged);
-        assert_eq!(status_from_gh(&json!({"state":"closed"})), PrStatus::Closed);
-        assert_eq!(status_from_gh(&json!({"state":"OPEN","isDraft":true})), PrStatus::Draft);
-        assert_eq!(
-            status_from_gh(&json!({"state":"OPEN","checks":{"state":"FAILURE"}})),
-            PrStatus::CiFailed
-        );
-        assert_eq!(
-            status_from_gh(&json!({"state":"OPEN","checks":{"state":"error"}})),
-            PrStatus::CiFailed
-        );
-        assert_eq!(
-            status_from_gh(&json!({"state":"OPEN","checks":{"state":"PENDING"}})),
-            PrStatus::CiRunning
-        );
-        assert_eq!(
-            status_from_gh(&json!({"state":"OPEN","checks":{"state":"SUCCESS"}})),
-            PrStatus::CiPassed
-        );
-        // No check state, but some passing checks: open.
-        assert_eq!(
-            status_from_gh(&json!({"state":"OPEN","checks":{"passing":2}})),
-            PrStatus::Open
-        );
-        // Nothing known at all: still running.
-        assert_eq!(status_from_gh(&json!({})), PrStatus::CiRunning);
-    }
+#[test]
+fn status_from_gh_reads_state_draft_and_checks() {
+    use serde_json::json;
+    assert_eq!(status_from_gh(&json!({"state":"MERGED"})), PrStatus::Merged);
+    assert_eq!(status_from_gh(&json!({"state":"closed"})), PrStatus::Closed);
+    assert_eq!(
+        status_from_gh(&json!({"state":"OPEN","isDraft":true})),
+        PrStatus::Draft
+    );
+    assert_eq!(
+        status_from_gh(&json!({"state":"OPEN","checks":{"state":"FAILURE"}})),
+        PrStatus::CiFailed
+    );
+    assert_eq!(
+        status_from_gh(&json!({"state":"OPEN","checks":{"state":"error"}})),
+        PrStatus::CiFailed
+    );
+    assert_eq!(
+        status_from_gh(&json!({"state":"OPEN","checks":{"state":"PENDING"}})),
+        PrStatus::CiRunning
+    );
+    assert_eq!(
+        status_from_gh(&json!({"state":"OPEN","checks":{"state":"SUCCESS"}})),
+        PrStatus::CiPassed
+    );
+    // No check state, but some passing checks: open.
+    assert_eq!(
+        status_from_gh(&json!({"state":"OPEN","checks":{"passing":2}})),
+        PrStatus::Open
+    );
+    // Nothing known at all: still running.
+    assert_eq!(status_from_gh(&json!({})), PrStatus::CiRunning);
+}
 
-    #[test]
-    fn active_statuses_are_the_ones_still_in_flight() {
-        for s in [PrStatus::CiRunning, PrStatus::CiPending, PrStatus::Open, PrStatus::Draft] {
-            assert!(is_active(s), "{s:?}");
-        }
-        for s in [PrStatus::CiPassed, PrStatus::CiFailed, PrStatus::Merged, PrStatus::Closed] {
-            assert!(!is_active(s), "{s:?}");
-        }
+#[test]
+fn active_statuses_are_the_ones_still_in_flight() {
+    for s in [
+        PrStatus::CiRunning,
+        PrStatus::CiPending,
+        PrStatus::Open,
+        PrStatus::Draft,
+    ] {
+        assert!(is_active(s), "{s:?}");
     }
+    for s in [
+        PrStatus::CiPassed,
+        PrStatus::CiFailed,
+        PrStatus::Merged,
+        PrStatus::Closed,
+    ] {
+        assert!(!is_active(s), "{s:?}");
+    }
+}
 
-    #[test]
-    fn every_status_has_a_name() {
-        for s in [
-            PrStatus::CiRunning, PrStatus::CiPassed, PrStatus::CiFailed, PrStatus::CiPending,
-            PrStatus::Merged, PrStatus::Closed, PrStatus::Draft, PrStatus::Open,
-        ] {
-            assert!(!s.as_str().is_empty());
-        }
+#[test]
+fn every_status_has_a_name() {
+    for s in [
+        PrStatus::CiRunning,
+        PrStatus::CiPassed,
+        PrStatus::CiFailed,
+        PrStatus::CiPending,
+        PrStatus::Merged,
+        PrStatus::Closed,
+        PrStatus::Draft,
+        PrStatus::Open,
+    ] {
+        assert!(!s.as_str().is_empty());
     }
+}
