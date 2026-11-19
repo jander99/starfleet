@@ -182,3 +182,189 @@ async fn connect_unix(_path: &std::path::Path) -> io::Result<Conn> {
         "direct Unix sockets are not available on this platform",
     ))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::env_guard;
+
+    fn clear_env() {
+        for k in ["HERDR_SESSION", "HERDR_SOCKET_PATH", "HOME"] {
+            std::env::remove_var(k);
+        }
+    }
+
+    #[test]
+    fn resolve_prefers_an_explicit_socket() {
+        let _g = env_guard();
+        clear_env();
+        let settings = Settings {
+            herdr_socket: Some("/run/herdr.sock".into()),
+            ..Default::default()
+        };
+        let e = Endpoint::resolve(&settings, &HostEnv::Native);
+        assert_eq!(e.describe(), "/run/herdr.sock");
+        clear_env();
+    }
+
+    #[test]
+    fn resolve_reads_the_socket_from_the_environment() {
+        let _g = env_guard();
+        clear_env();
+        std::env::set_var("HERDR_SOCKET_PATH", "/env/herdr.sock");
+        let e = Endpoint::resolve(&Settings::default(), &HostEnv::Native);
+        assert_eq!(e.describe(), "/env/herdr.sock");
+        clear_env();
+    }
+
+    #[test]
+    fn resolve_uses_the_default_socket_under_home() {
+        let _g = env_guard();
+        clear_env();
+        std::env::set_var("HOME", "/home/me");
+        let e = Endpoint::resolve(&Settings::default(), &HostEnv::Native);
+        assert_eq!(e.describe(), "/home/me/.config/herdr/herdr.sock");
+        clear_env();
+    }
+
+    #[test]
+    fn resolve_nests_a_named_session() {
+        let _g = env_guard();
+        clear_env();
+        std::env::set_var("HOME", "/home/me");
+        let settings = Settings {
+            herdr_session: Some("work-1".into()),
+            ..Default::default()
+        };
+        let e = Endpoint::resolve(&settings, &HostEnv::Native);
+        assert_eq!(
+            e.describe(),
+            "/home/me/.config/herdr/sessions/work-1/herdr.sock"
+        );
+        clear_env();
+    }
+
+    #[test]
+    fn resolve_takes_the_session_from_the_environment() {
+        let _g = env_guard();
+        clear_env();
+        std::env::set_var("HOME", "/home/me");
+        std::env::set_var("HERDR_SESSION", "from-env");
+        let e = Endpoint::resolve(&Settings::default(), &HostEnv::Native);
+        assert_eq!(
+            e.describe(),
+            "/home/me/.config/herdr/sessions/from-env/herdr.sock"
+        );
+        clear_env();
+    }
+
+    #[test]
+    fn resolve_ignores_an_unsafe_session_name() {
+        let _g = env_guard();
+        clear_env();
+        std::env::set_var("HOME", "/home/me");
+        let settings = Settings {
+            herdr_session: Some("../escape".into()),
+            ..Default::default()
+        };
+        let e = Endpoint::resolve(&settings, &HostEnv::Native);
+        assert_eq!(e.describe(), "/home/me/.config/herdr/herdr.sock");
+        clear_env();
+    }
+
+    #[test]
+    fn resolve_ignores_an_empty_session() {
+        let _g = env_guard();
+        clear_env();
+        std::env::set_var("HOME", "/home/me");
+        let settings = Settings {
+            herdr_session: Some("".into()),
+            ..Default::default()
+        };
+        let e = Endpoint::resolve(&settings, &HostEnv::Native);
+        assert_eq!(e.describe(), "/home/me/.config/herdr/herdr.sock");
+        clear_env();
+    }
+
+    #[test]
+    fn resolve_builds_a_relay_in_wsl() {
+        let _g = env_guard();
+        clear_env();
+        let env = HostEnv::Wsl { distro: None };
+
+        let e = Endpoint::resolve(&Settings::default(), &env);
+        assert_eq!(
+            e.describe(),
+            format!("{DEFAULT_SOCKET_EXPR} via {}", env.label())
+        );
+
+        let settings = Settings {
+            herdr_session: Some("s1".into()),
+            ..Default::default()
+        };
+        let e = Endpoint::resolve(&settings, &env);
+        assert!(matches!(e, Endpoint::Relay { .. }));
+        assert!(e.describe().contains("/sessions/s1/herdr.sock"));
+
+        let settings = Settings {
+            herdr_socket: Some("/wsl/sock".into()),
+            ..Default::default()
+        };
+        let e = Endpoint::resolve(&settings, &env);
+        // The explicit socket is shell-quoted for the relay.
+        assert_eq!(
+            e.describe(),
+            "'/wsl/sock' via windows + wsl (default distribution)"
+        );
+
+        // An empty explicit socket falls back to the default expression.
+        let settings = Settings {
+            herdr_socket: Some("".into()),
+            ..Default::default()
+        };
+        let e = Endpoint::resolve(&settings, &env);
+        assert_eq!(
+            e.describe(),
+            format!("{DEFAULT_SOCKET_EXPR} via {}", env.label())
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn connect_speaks_over_a_unix_socket() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::net::UnixListener;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("h.sock");
+        let listener = UnixListener::bind(&path).unwrap();
+
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            // Echo one line back.
+            let mut buf = [0u8; 64];
+            let n = stream.read(&mut buf).await.unwrap();
+            stream.write_all(&buf[..n]).await.unwrap();
+        });
+
+        let mut conn = connect(&Endpoint::Unix(path)).await.unwrap();
+        conn.send_line("hello").await.unwrap();
+        let line = conn.read_line().await.unwrap();
+        assert_eq!(line.as_deref(), Some("hello"));
+        // Once the server task finishes it drops the socket, so the next read is EOF.
+        server.await.unwrap();
+        assert_eq!(conn.read_line().await.unwrap(), None);
+        // No relay child, so there is no close reason.
+        assert_eq!(conn.close_reason().await, None);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn connect_fails_for_a_missing_socket() {
+        let err = match connect(&Endpoint::Unix(PathBuf::from("/nonexistent/x.sock"))).await {
+            Ok(_) => panic!("connected to a missing socket"),
+            Err(e) => e,
+        };
+        assert_eq!(err.kind(), io::ErrorKind::NotFound);
+    }
+}

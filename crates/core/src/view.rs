@@ -411,6 +411,20 @@ mod tests {
     }
 
     #[test]
+    fn every_agent_status_maps_to_a_session_status() {
+        use SessionStatus as S;
+        for (from, want) in [
+            (AgentStatus::Blocked, S::Blocked),
+            (AgentStatus::Done, S::Done),
+            (AgentStatus::Working, S::Working),
+            (AgentStatus::Idle, S::Idle),
+            (AgentStatus::Unknown, S::Unknown),
+        ] {
+            assert_eq!(S::from(from), want);
+        }
+    }
+
+    #[test]
     fn the_attention_order_puts_blocked_first_then_interrupted() {
         assert!(attention_rank(CardState::Blocked) < attention_rank(CardState::Interrupted));
         assert!(attention_rank(CardState::Interrupted) < attention_rank(CardState::Done));

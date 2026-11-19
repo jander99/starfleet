@@ -746,6 +746,50 @@ mod tests {
     }
 
     #[test]
+    fn a_link_without_terminal_or_agent_session_falls_back_to_its_pane_id() {
+        let link = SessionLink {
+            pane_id: Some("w1:p1".into()),
+            ..SessionLink::default()
+        };
+        assert_eq!(
+            link.find_live(&[pane("w1:p1", "term_1")]).unwrap().pane_id,
+            "w1:p1"
+        );
+        assert!(link.find_live(&[pane("w2:p2", "term_1")]).is_none());
+        // With no pane id either, nothing matches.
+        let bare = SessionLink::default();
+        assert!(bare.find_live(&[pane("w1:p1", "term_1")]).is_none());
+    }
+
+    #[test]
+    fn a_link_finds_its_pane_by_agent_session_when_the_terminal_moved() {
+        let link = SessionLink {
+            agent_session: Some(AgentSessionInfo {
+                source: String::new(),
+                agent: "claude".into(),
+                kind: String::new(),
+                value: "s-9".into(),
+            }),
+            ..SessionLink::default()
+        };
+        let mut p = pane("w3:p7", "term_new");
+        p.agent_session = Some(AgentSessionInfo {
+            source: String::new(),
+            agent: "claude".into(),
+            kind: String::new(),
+            value: "s-9".into(),
+        });
+        assert_eq!(link.find_live(&[p]).unwrap().pane_id, "w3:p7");
+        // An empty terminal id is ignored rather than matched against another
+        // pane that happens to have an empty one.
+        let link = SessionLink {
+            terminal_id: Some(String::new()),
+            ..link
+        };
+        assert!(link.find_live(&[pane("w1:p1", "")]).is_none());
+    }
+
+    #[test]
     fn a_reused_pane_id_does_not_steal_a_link() {
         let link = SessionLink {
             terminal_id: Some("term_1".into()),
