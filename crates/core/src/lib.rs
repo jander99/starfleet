@@ -30,4 +30,25 @@ pub(crate) mod test_support {
     pub fn env_guard() -> MutexGuard<'static, ()> {
         ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner())
     }
+
+    /// Remembers the given variables and puts them back on drop, even if the
+    /// test panics, so one test cannot leak env changes into the next.
+    pub struct EnvRestore(Vec<(&'static str, Option<std::ffi::OsString>)>);
+
+    impl EnvRestore {
+        pub fn new(keys: &[&'static str]) -> Self {
+            Self(keys.iter().map(|k| (*k, std::env::var_os(k))).collect())
+        }
+    }
+
+    impl Drop for EnvRestore {
+        fn drop(&mut self) {
+            for (k, v) in &self.0 {
+                match v {
+                    Some(v) => std::env::set_var(k, v),
+                    None => std::env::remove_var(k),
+                }
+            }
+        }
+    }
 }

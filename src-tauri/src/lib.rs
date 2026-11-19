@@ -385,7 +385,8 @@ mod tests {
         assert!(!a.is_empty());
         // Detaching an unknown link is a no-op, not a panic.
         assert!(detach(app.state(), "nope".into()).is_ok());
-        let _ = attach(app.state(), id, "pane-x".into());
+        // No live pane by that id, so attaching is refused.
+        assert!(attach(app.state(), id, "pane-x".into()).is_err());
     }
 
     #[test]
@@ -485,29 +486,27 @@ mod tests {
         assert!(*changes.borrow() > before);
     }
 
+    #[cfg(unix)]
     #[test]
     fn boot_reports_a_core_that_cannot_start() {
         let _g = env_guard();
         let app = tauri::test::mock_builder()
             .build(tauri::generate_context!())
             .unwrap();
-        // A directory where the config file must live makes the start fail
-        // only if the path is unusable; force it by pointing at a file.
-        let file = tempfile::NamedTempFile::new().unwrap();
+        // An invalid roster file makes the core refuse to start.
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::at(dir.path());
+        std::fs::create_dir_all(&paths.config_dir).unwrap();
+        std::fs::write(paths.roster_file(), "{ nope").unwrap();
         let old = std::env::var("STARFLEET_HOME").ok();
-        std::env::set_var("STARFLEET_HOME", file.path());
+        std::env::set_var("STARFLEET_HOME", dir.path());
         let core = boot(app.handle());
         match old {
             Some(v) => std::env::set_var("STARFLEET_HOME", v),
             None => std::env::remove_var("STARFLEET_HOME"),
         }
-        // Either it started (paths under the file are still constructible) or
-        // it carries a readable reason — never a panic.
-        if let Ok(sf) = core.get() {
-            assert!(!sf.paths().config_dir.as_os_str().is_empty());
-        } else {
-            assert!(!core.get().err().unwrap().is_empty());
-        }
+        let err = core.get().err().expect("the core must not start");
+        assert!(err.contains("roster"), "unexpected reason: {err}");
     }
 
     #[test]
