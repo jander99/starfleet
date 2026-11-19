@@ -132,7 +132,7 @@ export const fakeBackend: Backend = {
   addArtifact: vi.fn(async () => "a-new"),
   openArtifact: vi.fn(async () => {}),
   readLog: vi.fn(async () => [] as LogEntry[]),
-  appendLog: vi.fn(async (cardId: string, text: string, opts?: { kind?: string; sessionId?: string | null }) =>
+  appendLog: vi.fn(async (_cardId: string, text: string, opts?: { kind?: string; sessionId?: string | null }) =>
     makeLog({ id: "e-new", text, kind: opts?.kind ?? "note", session_id: opts?.sessionId ?? null }),
   ),
   onChange: vi.fn(() => () => {}),

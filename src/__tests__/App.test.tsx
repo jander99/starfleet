@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import App from "../App";
 import { backend } from "../api";
-import { makeCard, makeContact, makeSession, makeStation, makeView } from "./helpers";
+import { makeCard, makeContact, makeSession, makeView } from "./helpers";
 
 vi.mock("../api", async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
