@@ -27,12 +27,12 @@ export function artifactStatus(a: Artifact): { text: string; tone: Tone } {
   const tone: Tone =
     a.last_status === "ci_failed" || a.last_status === "closed"
       ? "bad"
-      : a.last_status === "ci_running"
-        ? "warn"
-        : a.last_status === "ci_passed" || a.last_status === "merged"
-          ? age > 3600_000
-            ? "muted" // a green from an hour ago may be stale
-            : "ok"
-          : "muted";
+      : age > 3600_000
+        ? "muted" // any verdict older than an hour, or never timestamped, may be stale
+        : a.last_status === "ci_running"
+          ? "warn"
+          : a.last_status === "ci_passed" || a.last_status === "merged"
+            ? "ok"
+            : "muted";
   return { text: when ? `${what} · ${when}` : what, tone };
 }

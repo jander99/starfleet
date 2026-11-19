@@ -104,7 +104,8 @@ export default function App() {
   const [drawer, setDrawer] = useState<Drawer>(null);
   const [dispatch, setDispatch] = useState<{ stationId: string | null; cardId: string | null } | null>(null);
   const [cardDialog, setCardDialog] = useState<{ card: Card | null } | null>(null);
-  const [consoleCard, setConsoleCard] = useState<Card | null>(null);
+  const [consoleId, setConsoleId] = useState<string | null>(null);
+  const consoleCard = view?.cards.find((c) => c.id === consoleId) ?? null;
   const [checks, setChecks] = useState<Check[] | null>(null);
   const [checking, setChecking] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -220,7 +221,7 @@ export default function App() {
                 onArtifact={(cardId, artifactId) =>
                   backend.openArtifact(cardId, artifactId).catch((e) => setNotice(errorText(e)))
                 }
-                onConsole={setConsoleCard}
+                onConsole={(c) => setConsoleId(c.id)}
               />
             )}
             {tab === "check" && <Preflight checks={checks} running={checking} onRun={runChecks} />}
@@ -245,8 +246,8 @@ export default function App() {
         )}
         {cardDialog && <CardDialog card={cardDialog.card} onClose={() => setCardDialog(null)} />}
         {consoleCard && (
-          <div className="console-scrim" onMouseDown={(e) => e.target === e.currentTarget && setConsoleCard(null)}>
-            <CardConsole key={consoleCard.id} card={consoleCard} onClose={() => setConsoleCard(null)} />
+          <div className="console-scrim" onMouseDown={(e) => e.target === e.currentTarget && setConsoleId(null)}>
+            <CardConsole key={consoleCard.id} card={consoleCard} onClose={() => setConsoleId(null)} />
           </div>
         )}
       </div>
