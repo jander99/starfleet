@@ -154,7 +154,7 @@ mod tests {
     #[tokio::test]
     async fn command_wraps_native_and_wsl_scripts() {
         // Native: sh -c <script>.
-        let mut cmd = HostEnv::Native.command("echo hi");
+        let cmd = HostEnv::Native.command("echo hi");
         let prog = cmd.as_std().get_program().to_string_lossy().to_string();
         let args: Vec<String> = cmd
             .as_std()
@@ -165,7 +165,7 @@ mod tests {
         assert_eq!(args, ["-c", "echo hi"]);
 
         // WSL with a distro: wsl.exe -d <distro> -e sh -c <script>.
-        let mut cmd = HostEnv::Wsl {
+        let cmd = HostEnv::Wsl {
             distro: Some("Ubuntu".into()),
         }
         .command("echo hi");
@@ -179,7 +179,7 @@ mod tests {
         assert_eq!(args, ["-d", "Ubuntu", "-e", "sh", "-c", "echo hi"]);
 
         // WSL without a distro omits -d.
-        let mut cmd = HostEnv::Wsl { distro: None }.command("true");
+        let cmd = HostEnv::Wsl { distro: None }.command("true");
         let args: Vec<String> = cmd
             .as_std()
             .get_args()

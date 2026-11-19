@@ -425,6 +425,9 @@ mod tests {
 
     #[cfg(unix)]
     #[tokio::test]
+    // The env guard is held across awaits on purpose: it serializes env
+    // mutation between tests.
+    #[allow(clippy::await_holding_lock)]
     async fn a_tool_on_the_path_is_ok() {
         use std::os::unix::fs::PermissionsExt;
         let _g = crate::test_support::env_guard();
@@ -446,6 +449,9 @@ mod tests {
 
     #[cfg(unix)]
     #[tokio::test]
+    // The env guard is held across awaits on purpose: it serializes env
+    // mutation between tests.
+    #[allow(clippy::await_holding_lock)]
     async fn a_tool_without_a_version_shows_just_its_path() {
         use std::os::unix::fs::PermissionsExt;
         let _g = crate::test_support::env_guard();
@@ -505,6 +511,9 @@ mod tests {
 
     #[cfg(unix)]
     #[tokio::test]
+    // The env guard is held across awaits on purpose: it serializes env
+    // mutation between tests.
+    #[allow(clippy::await_holding_lock)]
     async fn claude_mem_reports_a_worker_that_answers() {
         let _g = crate::test_support::env_guard();
         let dir = tempfile::tempdir().unwrap();
@@ -527,6 +536,9 @@ mod tests {
 
     #[cfg(unix)]
     #[tokio::test]
+    // The env guard is held across awaits on purpose: it serializes env
+    // mutation between tests.
+    #[allow(clippy::await_holding_lock)]
     async fn claude_mem_warns_when_installed_but_silent() {
         let _g = crate::test_support::env_guard();
         let dir = tempfile::tempdir().unwrap();
@@ -553,6 +565,9 @@ mod tests {
 
     #[cfg(unix)]
     #[tokio::test]
+    // The env guard is held across awaits on purpose: it serializes env
+    // mutation between tests.
+    #[allow(clippy::await_holding_lock)]
     async fn claude_mem_warns_when_not_installed() {
         let _g = crate::test_support::env_guard();
         let old_dir = std::env::var("CLAUDE_MEM_DATA_DIR").ok();
