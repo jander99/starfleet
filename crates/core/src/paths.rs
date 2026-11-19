@@ -126,7 +126,7 @@ mod tests {
     use super::*;
     use std::path::Path;
 
-    use crate::test_support::env_guard;
+    use crate::test_support::{env_guard, EnvRestore};
 
     fn root() -> tempfile::TempDir {
         tempfile::tempdir().unwrap()
@@ -148,9 +148,9 @@ mod tests {
     fn resolve_honors_starfleet_home() {
         // Serialized with the other env tests through a guard.
         let _g = env_guard();
+        let _restore = EnvRestore::new(&["STARFLEET_HOME"]);
         std::env::set_var("STARFLEET_HOME", "/tmp/sf-home");
         let p = Paths::resolve().unwrap();
-        std::env::remove_var("STARFLEET_HOME");
         assert_eq!(p.config_dir, Path::new("/tmp/sf-home/config"));
         assert_eq!(p.data_dir, Path::new("/tmp/sf-home/data"));
     }
@@ -159,6 +159,8 @@ mod tests {
     #[test]
     fn resolve_uses_xdg_then_dotfiles() {
         let _g = env_guard();
+        let _restore =
+            EnvRestore::new(&["STARFLEET_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "HOME"]);
         for k in ["STARFLEET_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "HOME"] {
             std::env::remove_var(k);
         }
@@ -177,19 +179,16 @@ mod tests {
         std::env::set_var("XDG_CONFIG_HOME", "   ");
         let p = Paths::resolve().unwrap();
         assert_eq!(p.config_dir, Path::new("/home/me/.config/starfleet"));
-        for k in ["XDG_CONFIG_HOME", "XDG_DATA_HOME", "HOME"] {
-            std::env::remove_var(k);
-        }
     }
 
     #[cfg(unix)]
     #[test]
     fn home_dir_falls_back_to_userprofile() {
         let _g = env_guard();
+        let _restore = EnvRestore::new(&["HOME", "USERPROFILE"]);
         std::env::remove_var("HOME");
         std::env::set_var("USERPROFILE", "/users/me");
         assert_eq!(home_dir(), Some(PathBuf::from("/users/me")));
-        std::env::remove_var("USERPROFILE");
     }
 
     #[test]
