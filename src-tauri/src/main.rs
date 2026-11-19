@@ -45,3 +45,17 @@ fn main() {
     detach_from_terminal();
     starfleet_lib::run()
 }
+
+#[cfg(test)]
+mod tests {
+    // A release-only helper: this test keeps the code compiled under `cargo
+    // test --release`, where it is otherwise dead.
+    #[cfg(all(unix, not(debug_assertions)))]
+    #[test]
+    fn detach_is_a_no_op_when_asked_to_stay() {
+        // STARFLEET_FOREGROUND makes it return instead of re-executing.
+        std::env::set_var("STARFLEET_FOREGROUND", "1");
+        super::detach_from_terminal();
+        std::env::remove_var("STARFLEET_FOREGROUND");
+    }
+}

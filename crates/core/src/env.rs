@@ -111,4 +111,75 @@ mod tests {
         assert!(out.ok);
         assert_eq!(out.stdout, "a 'b' $c");
     }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn native_shell_reports_failures_and_stderr() {
+        let out = HostEnv::Native.sh("echo oops >&2; exit 3").await.unwrap();
+        assert!(!out.ok);
+        assert_eq!(out.stderr, "oops");
+    }
+
+    #[test]
+    fn detect_follows_the_platform() {
+        let env = HostEnv::detect(Some("Ubuntu".into()));
+        if cfg!(windows) {
+            assert_eq!(env, HostEnv::Wsl { distro: Some("Ubuntu".into()) });
+        } else {
+            assert_eq!(env, HostEnv::Native);
+        }
+    }
+
+    #[test]
+    fn label_names_each_environment() {
+        assert_eq!(HostEnv::Native.label(), std::env::consts::OS);
+        assert_eq!(
+            HostEnv::Wsl { distro: Some("Ubuntu".into()) }.label(),
+            "windows + wsl (Ubuntu)"
+        );
+        assert_eq!(
+            HostEnv::Wsl { distro: None }.label(),
+            "windows + wsl (default distribution)"
+        );
+    }
+
+    #[tokio::test]
+    async fn command_wraps_native_and_wsl_scripts() {
+        // Native: sh -c <script>.
+        let mut cmd = HostEnv::Native.command("echo hi");
+        let prog = cmd.as_std().get_program().to_string_lossy().to_string();
+        let args: Vec<String> = cmd
+            .as_std()
+            .get_args()
+            .map(|a| a.to_string_lossy().to_string())
+            .collect();
+        assert_eq!(prog, "sh");
+        assert_eq!(args, ["-c", "echo hi"]);
+
+        // WSL with a distro: wsl.exe -d <distro> -e sh -c <script>.
+        let mut cmd = HostEnv::Wsl { distro: Some("Ubuntu".into()) }.command("echo hi");
+        let prog = cmd.as_std().get_program().to_string_lossy().to_string();
+        let args: Vec<String> = cmd
+            .as_std()
+            .get_args()
+            .map(|a| a.to_string_lossy().to_string())
+            .collect();
+        assert!(prog.ends_with("wsl.exe"), "{prog}");
+        assert_eq!(args, ["-d", "Ubuntu", "-e", "sh", "-c", "echo hi"]);
+
+        // WSL without a distro omits -d.
+        let mut cmd = HostEnv::Wsl { distro: None }.command("true");
+        let args: Vec<String> = cmd
+            .as_std()
+            .get_args()
+            .map(|a| a.to_string_lossy().to_string())
+            .collect();
+        assert_eq!(args, ["-e", "sh", "-c", "true"]);
+    }
+
+    #[test]
+    fn sh_quote_leaves_plain_text_alone() {
+        assert_eq!(sh_quote("/tmp/a b"), "'/tmp/a b'");
+        assert_eq!(sh_quote(""), "''");
+    }
 }

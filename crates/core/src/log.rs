@@ -80,6 +80,18 @@ mod tests {
     use crate::paths::Paths;
 
     #[test]
+    fn a_read_error_that_is_not_a_missing_file_is_reported() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::at(dir.path());
+        // A directory where the log file should be: readable-as-missing is not
+        // enough, the error must come back to the caller.
+        std::fs::create_dir_all(paths.logs_dir().join("c1.jsonl")).unwrap();
+        assert!(read(&paths, "c1").is_err());
+        // A missing file is still an empty log, not an error.
+        assert_eq!(read(&paths, "nope").unwrap(), Vec::new());
+    }
+
+    #[test]
     fn the_log_is_append_only_jsonl_and_skips_a_torn_line() {
         let dir = tempfile::tempdir().unwrap();
         let paths = Paths::at(dir.path());

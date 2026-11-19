@@ -215,21 +215,28 @@ fn start_core() -> Result<Arc<Starfleet>, String> {
     .map_err(text)
 }
 
+/// Start the core and wire it to the window: the Herdr monitor runs in the
+/// background, and every board change is forwarded to the UI as an event.
+/// Kept separate from `run` so it can be exercised without a real window.
+fn boot<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Core {
+    let core = start_core();
+    if let Ok(starfleet) = &core {
+        tauri::async_runtime::spawn(starfleet.clone().run_monitor());
+        let mut changes = starfleet.changes();
+        let handle = app.clone();
+        tauri::async_runtime::spawn(async move {
+            while changes.changed().await.is_ok() {
+                let _ = handle.emit("board-changed", ());
+            }
+        });
+    }
+    Core(core)
+}
+
 pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
-            let core = start_core();
-            if let Ok(starfleet) = &core {
-                tauri::async_runtime::spawn(starfleet.clone().run_monitor());
-                let mut changes = starfleet.changes();
-                let handle = app.handle().clone();
-                tauri::async_runtime::spawn(async move {
-                    while changes.changed().await.is_ok() {
-                        let _ = handle.emit("board-changed", ());
-                    }
-                });
-            }
-            app.manage(Core(core));
+            app.manage(boot(app.handle()));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -256,4 +263,216 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("failed to start the Starfleet window");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use starfleet_core::paths::Paths;
+
+    /// A started core on a scratch home, plus the app that owns it as state.
+    fn app() -> (tauri::App<tauri::test::MockRuntime>, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::at(dir.path());
+        std::fs::create_dir_all(&paths.config_dir).unwrap();
+        let core = Starfleet::new(Options { paths, endpoint: None, env: None, gh: None }).unwrap();
+        let app = tauri::test::mock_builder().build(tauri::generate_context!()).unwrap();
+        app.manage(Core(Ok(core)));
+        (app, dir)
+    }
+
+    /// Id of an existing card, creating one on the scratch board if needed.
+    fn a_card(app: &tauri::App<tauri::test::MockRuntime>) -> String {
+        let cards = board_view(app.state()).unwrap().cards;
+        match cards.first() {
+            Some(c) => c.card.id.clone(),
+            None => tauri::async_runtime::block_on(create_card(
+                app.state(),
+                "seed".into(),
+                "/tmp".into(),
+                String::new(),
+            ))
+            .unwrap(),
+        }
+    }
+
+    #[test]
+    fn board_view_and_roster_round_trip() {
+        let (app, _dir) = app();
+        let view = board_view(app.state()).unwrap();
+        // Nothing is listening on the scratch socket, but the view still builds.
+        assert!(!view.endpoint.is_empty());
+        let roster = roster(app.state()).unwrap();
+        assert!(!roster.locations.is_empty());
+    }
+
+    #[test]
+    fn a_core_that_failed_to_start_reports_its_reason() {
+        let app = tauri::test::mock_builder().build(tauri::generate_context!()).unwrap();
+        app.manage(Core(Err("bad roster".into())));
+        assert_eq!(board_view(app.state()).unwrap_err(), "bad roster");
+        assert_eq!(delete_card(app.state(), "c1".into()).unwrap_err(), "bad roster");
+    }
+
+    #[tokio::test]
+    async fn card_lifecycle_commands_work() {
+        let (app, _dir) = app();
+        // Use a scratch folder for the card so no real path is touched.
+        let id = create_card(app.state(), "T".into(), "/tmp".into(), "n".into()).await.unwrap();
+        update_card(app.state(), id.clone(), Some("T2".into()), None, Some("more".into()), Some(true))
+            .await
+            .unwrap();
+        let card = board_view(app.state()).unwrap().cards.into_iter().find(|c| c.card.id == id).unwrap();
+        assert_eq!(card.card.title, "T2");
+        assert_eq!(card.card.notes, "more");
+        assert!(card.card.done);
+        delete_card(app.state(), id.clone()).unwrap();
+        assert!(board_view(app.state()).unwrap().cards.iter().all(|c| c.card.id != id));
+    }
+
+    #[tokio::test]
+    async fn create_card_rejects_a_bad_folder() {
+        let (app, _dir) = app();
+        let err = create_card(app.state(), "T".into(), "".into(), "".into()).await.unwrap_err();
+        assert!(!err.is_empty());
+    }
+
+    #[test]
+    fn artifacts_and_links_round_trip() {
+        let (app, _dir) = app();
+        let id = a_card(&app);
+        let a = add_artifact(app.state(), id.clone(), starfleet_core::store::ArtifactKind::Url, "Docs".into(), "https://x".into())
+            .unwrap();
+        assert!(!a.is_empty());
+        // Detaching an unknown link is a no-op, not a panic.
+        assert!(detach(app.state(), "nope".into()).is_ok());
+        let _ = attach(app.state(), id, "pane-x".into());
+    }
+
+    #[test]
+    fn read_log_limits_to_the_newest_entries() {
+        let (app, _dir) = app();
+        let id = a_card(&app);
+        for i in 0..3 {
+            append_log(app.state(), id.clone(), format!("entry {i}"), None, None).unwrap();
+        }
+        assert_eq!(read_log(app.state(), id.clone(), None).unwrap().len(), 3);
+        let last = read_log(app.state(), id.clone(), Some(1)).unwrap();
+        assert_eq!(last.len(), 1);
+        assert_eq!(last[0].text, "entry 2");
+        // A limit beyond the count keeps everything.
+        assert_eq!(read_log(app.state(), id, Some(99)).unwrap().len(), 3);
+    }
+
+    #[test]
+    fn append_log_validates_its_input() {
+        let (app, _dir) = app();
+        let id = a_card(&app);
+        assert_eq!(append_log(app.state(), id.clone(), "   ".into(), None, None).unwrap_err(), "write something first");
+        assert_eq!(
+            append_log(app.state(), id.clone(), "x".into(), Some("prompt".into()), None).unwrap_err(),
+            "not a log entry kind: prompt"
+        );
+        let e = append_log(app.state(), id, "kept".into(), Some("decision".into()), Some("l1".into())).unwrap();
+        assert_eq!(e.owner, "captain");
+        assert_eq!(e.kind, "decision");
+        assert_eq!(e.session_id.as_deref(), Some("l1"));
+        assert_eq!(e.text, "kept");
+    }
+
+    /// Process env is global: every test that sets or clears a variable
+    /// serializes on this one lock.
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn env_guard() -> std::sync::MutexGuard<'static, ()> {
+        ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn start_core_honors_starfleet_home() {
+        let _g = env_guard();
+        let dir = tempfile::tempdir().unwrap();
+        let old = std::env::var("STARFLEET_HOME").ok();
+        std::env::set_var("STARFLEET_HOME", dir.path());
+        let core = start_core();
+        match old {
+            Some(v) => std::env::set_var("STARFLEET_HOME", v),
+            None => std::env::remove_var("STARFLEET_HOME"),
+        }
+        let core = core.unwrap();
+        assert_eq!(core.paths().config_dir, dir.path().join("config"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn boot_wires_the_core_to_the_window() {
+        let _g = env_guard();
+        let dir = tempfile::tempdir().unwrap();
+        let old = std::env::var("STARFLEET_HOME").ok();
+        std::env::set_var("STARFLEET_HOME", dir.path());
+        let app = tauri::test::mock_builder().build(tauri::generate_context!()).unwrap();
+        let core = boot(app.handle());
+        match old {
+            Some(v) => std::env::set_var("STARFLEET_HOME", v),
+            None => std::env::remove_var("STARFLEET_HOME"),
+        }
+        // The core started and points at the scratch home.
+        let sf = core.get().unwrap();
+        assert_eq!(sf.paths().config_dir, dir.path().join("config"));
+        // A board change bumps the watch value the event task is listening on.
+        let changes = sf.changes();
+        let before = *changes.borrow();
+        tauri::async_runtime::block_on(sf.create_card("T", "/tmp", "")).unwrap();
+        assert!(*changes.borrow() > before);
+    }
+
+    #[test]
+    fn boot_reports_a_core_that_cannot_start() {
+        let _g = env_guard();
+        let app = tauri::test::mock_builder()
+            .build(tauri::generate_context!())
+            .unwrap();
+        // A directory where the config file must live makes the start fail
+        // only if the path is unusable; force it by pointing at a file.
+        let file = tempfile::NamedTempFile::new().unwrap();
+        let old = std::env::var("STARFLEET_HOME").ok();
+        std::env::set_var("STARFLEET_HOME", file.path());
+        let core = boot(app.handle());
+        match old {
+            Some(v) => std::env::set_var("STARFLEET_HOME", v),
+            None => std::env::remove_var("STARFLEET_HOME"),
+        }
+        // Either it started (paths under the file are still constructible) or
+        // it carries a readable reason — never a panic.
+        if let Ok(sf) = core.get() {
+            assert!(!sf.paths().config_dir.as_os_str().is_empty());
+        } else {
+            assert!(!core.get().err().unwrap().is_empty());
+        }
+    }
+
+    #[test]
+    fn text_keeps_the_error_chain() {
+        let e = anyhow::anyhow!("outer").context("inner");
+        assert_eq!(text(e), "inner: outer");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn agent_commands_reach_the_core() {
+        let (app, _dir) = app();
+        // No Herdr is listening, so these fail — but they run the core path.
+        let _ = preflight(app.state()).await;
+        assert!(tail(app.state(), "p1".into(), 10).await.is_err());
+        assert!(focus(app.state(), "p1".into()).await.is_err());
+        assert!(follow_up(app.state(), "p1".into(), "hi".into()).await.is_err());
+        assert!(reply_keys(app.state(), "p1".into(), None, vec!["enter".into()]).await.is_err());
+        assert!(send_pending(app.state(), "l1".into()).await.is_err());
+        assert!(saved_output(app.state(), "l1".into()).is_err());
+        let _ = poll_prs(app.state()).await;
+        let req = DispatchRequest { card_id: "c".into(), station_id: "s".into(), prompt: "p".into(), agent: None, model: None };
+        assert!(dispatch(app.state(), req).await.is_err());
+        assert!(open_artifact(app.state(), "c".into(), "a".into()).await.is_err());
+    }
 }

@@ -120,3 +120,113 @@ pub fn write_atomic(file: &Path, contents: &str) -> Result<()> {
     std::fs::rename(&tmp, file)?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    use crate::test_support::env_guard;
+
+    fn root() -> tempfile::TempDir {
+        tempfile::tempdir().unwrap()
+    }
+
+    #[test]
+    fn at_puts_config_and_data_under_one_root() {
+        let p = Paths::at(Path::new("/srv/sf"));
+        assert_eq!(p.config_dir, Path::new("/srv/sf/config"));
+        assert_eq!(p.data_dir, Path::new("/srv/sf/data"));
+        assert_eq!(p.settings_file(), Path::new("/srv/sf/config/settings.json"));
+        assert_eq!(p.roster_file(), Path::new("/srv/sf/config/roster.json"));
+        assert_eq!(p.board_file(), Path::new("/srv/sf/data/board.json"));
+        assert_eq!(p.logs_dir(), Path::new("/srv/sf/data/logs"));
+        assert_eq!(p.log_file("c1"), Path::new("/srv/sf/data/logs/c1.jsonl"));
+    }
+
+    #[test]
+    fn resolve_honors_starfleet_home() {
+        // Serialized with the other env tests through a guard.
+        let _g = env_guard();
+        std::env::set_var("STARFLEET_HOME", "/tmp/sf-home");
+        let p = Paths::resolve().unwrap();
+        std::env::remove_var("STARFLEET_HOME");
+        assert_eq!(p.config_dir, Path::new("/tmp/sf-home/config"));
+        assert_eq!(p.data_dir, Path::new("/tmp/sf-home/data"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn resolve_uses_xdg_then_dotfiles() {
+        let _g = env_guard();
+        for k in ["STARFLEET_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "HOME"] {
+            std::env::remove_var(k);
+        }
+        std::env::set_var("HOME", "/home/me");
+        let p = Paths::resolve().unwrap();
+        assert_eq!(p.config_dir, Path::new("/home/me/.config/starfleet"));
+        assert_eq!(p.data_dir, Path::new("/home/me/.local/share/starfleet"));
+
+        std::env::set_var("XDG_CONFIG_HOME", "/cfg");
+        std::env::set_var("XDG_DATA_HOME", "/dat");
+        let p = Paths::resolve().unwrap();
+        assert_eq!(p.config_dir, Path::new("/cfg/starfleet"));
+        assert_eq!(p.data_dir, Path::new("/dat/starfleet"));
+
+        // A blank value counts as unset.
+        std::env::set_var("XDG_CONFIG_HOME", "   ");
+        let p = Paths::resolve().unwrap();
+        assert_eq!(p.config_dir, Path::new("/home/me/.config/starfleet"));
+        for k in ["XDG_CONFIG_HOME", "XDG_DATA_HOME", "HOME"] {
+            std::env::remove_var(k);
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn home_dir_falls_back_to_userprofile() {
+        let _g = env_guard();
+        std::env::remove_var("HOME");
+        std::env::set_var("USERPROFILE", "/users/me");
+        assert_eq!(home_dir(), Some(PathBuf::from("/users/me")));
+        std::env::remove_var("USERPROFILE");
+    }
+
+    #[test]
+    fn settings_default_when_missing_and_error_when_bad() {
+        let dir = root();
+        let paths = Paths::at(dir.path());
+        let s = Settings::load(&paths).unwrap();
+        assert!(s.herdr_socket.is_none() && s.herdr_session.is_none() && s.wsl_distro.is_none());
+
+        std::fs::create_dir_all(&paths.config_dir).unwrap();
+        std::fs::write(paths.settings_file(), "{ not json").unwrap();
+        let err = Settings::load(&paths).unwrap_err().to_string();
+        assert!(err.contains("is not valid"), "{err}");
+
+        std::fs::write(paths.settings_file(), r#"{"herdr_session":"work"}"#).unwrap();
+        let s = Settings::load(&paths).unwrap();
+        assert_eq!(s.herdr_session.as_deref(), Some("work"));
+    }
+
+    #[test]
+    fn write_atomic_creates_dirs_and_replaces() {
+        let dir = root();
+        let file = dir.path().join("deep/nested/file.txt");
+        write_atomic(&file, "one").unwrap();
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "one");
+        write_atomic(&file, "two").unwrap();
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "two");
+        // The temp sibling is gone after the rename.
+        assert!(!file.with_extension("tmp").exists());
+    }
+
+    #[test]
+    fn write_atomic_errors_on_an_unwritable_target() {
+        let dir = root();
+        // A directory where the file should go makes the rename fail.
+        let target = dir.path().join("d");
+        std::fs::create_dir(&target).unwrap();
+        assert!(write_atomic(&target, "x").is_err());
+    }
+}
