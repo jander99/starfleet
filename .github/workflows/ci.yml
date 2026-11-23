@@ -88,7 +88,7 @@ jobs:
 
       - name: Upload coverage
         if: runner.os == 'Linux' && !cancelled()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage
           path: coverage/
